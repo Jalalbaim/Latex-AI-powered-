@@ -9,6 +9,17 @@ machine: no account, no cloud, no API keys.
 - **Monaco editor** (the editor from VS Code) with LaTeX/BibTeX highlighting and auto-save
 - **Compile** with `latexmk` (Ctrl+S) and preview the PDF (rendered with PDF.js)
 - **Clickable errors and warnings** that jump to the offending line
+- **SyncTeX**: double-click in the PDF to jump to the source line; Ctrl+Alt+J
+  (or "⇥ Cursor") highlights the cursor's position in the PDF
+- **Autocomplete**: commands and snippets after `\`, environments after
+  `\begin{` (with the matching `\end{}`), labels in `\ref{}`, BibTeX keys in
+  `\cite{}` (with title/author), image and `.tex` paths, package names, and your
+  own `\newcommand`s
+- **Outline** of the document (sections across all `\input`/`\include` files),
+  click to jump; follows the cursor
+- **File management**: folders, rename/move (✎ or drag & drop), drop files from
+  your computer onto a folder to upload, delete folders, rename/delete projects,
+  download the project as `.zip` or the PDF
 - **Assistant** tab: chat about the current file, optionally including your selection
 - **AI rewrite** (Ctrl+Alt+E or right-click): rewrite the selection (or current
   paragraph) by instruction, review the change as a diff, then accept or reject
@@ -124,6 +135,13 @@ to get started.
 | Action | How |
 |---|---|
 | Compile | Ctrl+S (also saves) or the Compile button |
+| PDF → source | Double-click in the PDF |
+| Source → PDF | Ctrl+Alt+J, right-click → Show in PDF, or "⇥ Cursor" above the PDF |
+| Autocomplete | Type `\`, `\ref{`, `\cite{`, `\begin{`, … (Ctrl+Space to open it manually) |
+| Rename / move | Hover a file or folder → ✎, or drag it onto a folder (empty area = project root) |
+| Upload | ⇪ button, or drag files from your computer onto a folder |
+| Download | ⤓ in Files (project `.zip`), ⤓ above the PDF (PDF only) |
+| Rename / delete project | ✎ / 🗑 next to the project selector |
 | AI rewrite | Select text, then Ctrl+Alt+E or right-click → AI rewrite |
 | Chat | Assistant tab (tick "include selection" to send the selected text) |
 | Fix an error | Click **Fix with AI** next to a compile error |
@@ -310,7 +328,8 @@ latex-ai/
 ├── package.json       # Dependencies and `npm start` script
 ├── public/
 │   ├── index.html     # UI layout
-│   ├── app.js         # Editor, PDF viewer, AI features (front-end)
+│   ├── app.js         # Editor, PDF viewer, SyncTeX, file tree, AI features (front-end)
+│   ├── latex-intel.js # Autocomplete, outline and project index (labels, citations, commands)
 │   └── style.css
 └── projects/
     └── example/

@@ -6,6 +6,7 @@ import express from 'express';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -283,6 +284,118 @@ async function compileProject(dir, main) {
   };
 }
 
+// ---------- SyncTeX ----------
+
+function parseSynctex(output) {
+  // Returns the key/value records between "SyncTeX result begin/end".
+  const records = [];
+  let cur = null;
+  for (const line of output.split(/\r?\n/)) {
+    const m = /^(\w+):(.*)$/.exec(line);
+    if (!m) continue;
+    const [, key, value] = m;
+    if (key === 'Output' || !cur) {
+      cur = {};
+      records.push(cur);
+    }
+    cur[key] = value;
+  }
+  return records;
+}
+
+async function runSynctex(dir, args) {
+  let result;
+  try {
+    result = await runProcess('synctex', args, { cwd: dir }, 15000);
+  } catch (err) {
+    if (err.code === 'ENOENT') throw new HttpError(500, 'The synctex program was not found (it ships with TeX Live).');
+    throw err;
+  }
+  return parseSynctex(result.output);
+}
+
+function buildPdfPath(dir, main) {
+  return path.join(dir, BUILD_DIR, `${path.basename(main.replace(/\.tex$/i, ''))}.pdf`);
+}
+
+// ---------- zip (store + deflate, no dependencies) ----------
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function dosDateTime(date) {
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const day = ((Math.max(1980, date.getFullYear()) - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, day };
+}
+
+function buildZip(entries) {
+  // entries: [{ name, data: Buffer, mtime: Date }]
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const { name, data, mtime } of entries) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const deflated = zlib.deflateRawSync(data);
+    const useDeflate = deflated.length < data.length;
+    const body = useDeflate ? deflated : data;
+    const crc = crc32(data);
+    const { time, day } = dosDateTime(mtime);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(0x0800, 6); // UTF-8 names
+    local.writeUInt16LE(useDeflate ? 8 : 0, 8);
+    local.writeUInt16LE(time, 10);
+    local.writeUInt16LE(day, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(body.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    local.writeUInt16LE(0, 28);
+    locals.push(local, nameBuf, body);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(useDeflate ? 8 : 0, 10);
+    central.writeUInt16LE(time, 12);
+    central.writeUInt16LE(day, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(body.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(central, nameBuf);
+
+    offset += local.length + nameBuf.length + body.length;
+  }
+  const centralSize = centrals.reduce((n, b) => n + b.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+
 // ---------- Ollama ----------
 
 const SYSTEM_BASE =
@@ -426,6 +539,33 @@ app.post(
   }),
 );
 
+app.patch(
+  '/api/projects/:project',
+  json,
+  wrap(async (req, res) => {
+    const from = projectDir(req.params.project);
+    const to = projectDir(req.body?.name);
+    if (!(await exists(from))) throw new HttpError(404, 'Project not found.');
+    if (compileLocks.has(req.params.project)) throw new HttpError(409, 'Wait for the compile to finish.');
+    if (from === to) return res.json({ ok: true });
+    const caseOnly = from.toLowerCase() === to.toLowerCase();
+    if (!caseOnly && (await exists(to))) throw new HttpError(409, 'A project with that name already exists.');
+    await fs.rename(from, to);
+    res.json({ ok: true });
+  }),
+);
+
+app.delete(
+  '/api/projects/:project',
+  wrap(async (req, res) => {
+    const dir = projectDir(req.params.project);
+    if (!(await exists(dir))) throw new HttpError(404, 'Project not found.');
+    if (compileLocks.has(req.params.project)) throw new HttpError(409, 'Wait for the compile to finish.');
+    await fs.rm(dir, { recursive: true });
+    res.json({ ok: true });
+  }),
+);
+
 app.get(
   '/api/projects/:project/files',
   wrap(async (req, res) => {
@@ -489,6 +629,134 @@ app.delete(
     if (st.isDirectory()) await fs.rm(p, { recursive: true });
     else await fs.unlink(p);
     res.json({ ok: true });
+  }),
+);
+
+// Rename or move a file or folder inside a project.
+app.post(
+  '/api/projects/:project/move',
+  json,
+  wrap(async (req, res) => {
+    const dir = projectDir(req.params.project);
+    const from = await resolveInProject(dir, req.body?.from);
+    const to = await resolveInProject(dir, req.body?.to);
+    const st = await fs.lstat(from).catch(() => null);
+    if (!st) throw new HttpError(404, 'File not found.');
+    if (from === to) return res.json({ ok: true });
+    if (to.startsWith(from + path.sep)) throw new HttpError(400, 'A folder cannot be moved into itself.');
+    const caseOnly = from.toLowerCase() === to.toLowerCase();
+    if (!caseOnly && (await exists(to))) throw new HttpError(409, 'Something with that name already exists.');
+    await fs.mkdir(path.dirname(to), { recursive: true });
+    await fs.rename(from, to);
+    res.json({ ok: true });
+  }),
+);
+
+app.post(
+  '/api/projects/:project/folder',
+  json,
+  wrap(async (req, res) => {
+    const dir = projectDir(req.params.project);
+    const p = await resolveInProject(dir, req.body?.path);
+    if (await exists(p)) throw new HttpError(409, 'Something with that name already exists.');
+    await fs.mkdir(p, { recursive: true });
+    res.json({ ok: true });
+  }),
+);
+
+// Contents of the project's LaTeX sources, used for autocomplete and the outline.
+const SOURCE_EXTENSIONS = new Set(['.tex', '.bib', '.sty', '.cls', '.ltx', '.tikz']);
+app.get(
+  '/api/projects/:project/sources',
+  wrap(async (req, res) => {
+    const dir = projectDir(req.params.project);
+    if (!(await exists(dir))) throw new HttpError(404, 'Project not found.');
+    const files = [];
+    let total = 0;
+    for (const f of await listFiles(dir)) {
+      if (f.type !== 'file' || !SOURCE_EXTENSIONS.has(path.extname(f.path).toLowerCase())) continue;
+      const abs = path.join(dir, f.path);
+      const st = await fs.stat(abs).catch(() => null);
+      if (!st || st.size > 2_000_000 || total + st.size > 10_000_000) continue;
+      total += st.size;
+      files.push({ path: f.path, content: await fs.readFile(abs, 'utf8') });
+    }
+    res.json({ files });
+  }),
+);
+
+app.get(
+  '/api/projects/:project/download',
+  wrap(async (req, res) => {
+    const name = req.params.project;
+    const dir = projectDir(name);
+    if (!(await exists(dir))) throw new HttpError(404, 'Project not found.');
+    const entries = [];
+    for (const f of await listFiles(dir)) {
+      if (f.type !== 'file') continue;
+      const abs = path.join(dir, f.path);
+      const st = await fs.stat(abs);
+      entries.push({ name: `${name}/${f.path}`, data: await fs.readFile(abs), mtime: st.mtime });
+    }
+    res.setHeader('content-type', 'application/zip');
+    res.setHeader('content-disposition', `attachment; filename="${name}.zip"`);
+    res.send(buildZip(entries));
+  }),
+);
+
+// Source -> PDF: where does this line end up?
+app.get(
+  '/api/projects/:project/synctex/view',
+  wrap(async (req, res) => {
+    const dir = projectDir(req.params.project);
+    const main = typeof req.query.main === 'string' ? req.query.main : 'main.tex';
+    await resolveInProject(dir, main);
+    const file = await resolveInProject(dir, req.query.file);
+    const line = Math.max(1, Number.parseInt(req.query.line, 10) || 1);
+    const column = Math.max(0, Number.parseInt(req.query.column, 10) || 0);
+    const pdf = buildPdfPath(dir, main);
+    if (!(await exists(pdf))) throw new HttpError(404, 'No PDF yet. Compile first.');
+    const records = await runSynctex(dir, ['view', '-i', `${line}:${column}:${file}`, '-o', pdf]);
+    const boxes = records
+      .filter((r) => r.Page)
+      .map((r) => ({
+        page: Number(r.Page),
+        x: Number(r.x),
+        y: Number(r.y),
+        h: Number(r.h),
+        v: Number(r.v),
+        width: Number(r.W),
+        height: Number(r.H),
+      }))
+      .filter((b) => Number.isFinite(b.page) && b.page > 0);
+    res.json({ boxes });
+  }),
+);
+
+// PDF -> source: which file and line produced this point?
+app.get(
+  '/api/projects/:project/synctex/edit',
+  wrap(async (req, res) => {
+    const dir = projectDir(req.params.project);
+    const main = typeof req.query.main === 'string' ? req.query.main : 'main.tex';
+    await resolveInProject(dir, main);
+    const page = Number.parseInt(req.query.page, 10);
+    const x = Number(req.query.x);
+    const y = Number(req.query.y);
+    if (!(page > 0) || !Number.isFinite(x) || !Number.isFinite(y)) throw new HttpError(400, 'Invalid position.');
+    const pdf = buildPdfPath(dir, main);
+    if (!(await exists(pdf))) throw new HttpError(404, 'No PDF yet. Compile first.');
+    const records = await runSynctex(dir, ['edit', '-o', `${page}:${x.toFixed(2)}:${y.toFixed(2)}:${pdf}`]);
+    const hit = records.find((r) => r.Input && r.Line);
+    if (!hit) return res.json({ file: null });
+    const realDir = await fs.realpath(dir);
+    let input = path.resolve(dir, hit.Input.trim());
+    input = await fs.realpath(input).catch(() => input);
+    const rel = path.relative(realDir, input);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || rel.split(path.sep).some((s) => s.startsWith('.'))) {
+      return res.json({ file: null });
+    }
+    res.json({ file: rel.split(path.sep).join('/'), line: Math.max(1, Number.parseInt(hit.Line, 10) || 1) });
   }),
 );
 

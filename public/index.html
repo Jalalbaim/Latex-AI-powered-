@@ -13,6 +13,8 @@
       <select id="projectSelect" title="Project"></select>
     </label>
     <button id="newProjectBtn" title="New project">New</button>
+    <button id="renameProjectBtn" class="icon" title="Rename project">✎</button>
+    <button id="deleteProjectBtn" class="icon" title="Delete project">🗑</button>
     <span class="sep"></span>
     <label class="field">Main
       <select id="mainSelect" title="Main .tex file to compile"></select>
@@ -32,11 +34,17 @@
         <span>Files</span>
         <span class="actions">
           <button id="newFileBtn" class="icon" title="New text file">+</button>
+          <button id="newFolderBtn" class="icon" title="New folder">📁</button>
           <button id="uploadBtn" class="icon" title="Upload files (images, .bib, …)">⇪</button>
+          <button id="downloadZipBtn" class="icon" title="Download project as .zip">⤓</button>
           <input id="uploadInput" type="file" multiple hidden>
         </span>
       </div>
-      <ul id="fileTree" class="file-tree"></ul>
+      <ul id="fileTree" class="file-tree" title="Drag files onto a folder to move them; drop files from your computer to upload"></ul>
+      <div class="panel-head outline-head">
+        <span>Outline</span>
+      </div>
+      <ul id="outline" class="outline"></ul>
     </aside>
 
     <section class="editor-col">
@@ -58,13 +66,15 @@
         <button data-tab="chat">Assistant</button>
         <span class="spacer"></span>
         <span id="pdfControls" class="actions">
+          <button id="syncBtn" title="Show the cursor position in the PDF (Ctrl+Alt+J)">⇥ Cursor</button>
+          <a id="downloadPdfBtn" class="button icon hidden" title="Download PDF" download>⤓</a>
           <button id="zoomOut" class="icon" title="Zoom out">−</button>
           <button id="zoomFit" title="Fit width">Fit</button>
           <button id="zoomIn" class="icon" title="Zoom in">+</button>
         </span>
       </nav>
       <div id="pdfPane" class="pane">
-        <div id="pdfContainer"><p class="empty">Compile to see the PDF.</p></div>
+        <div id="pdfContainer" title="Double-click in the PDF to jump to the source"><p class="empty">Compile to see the PDF.</p></div>
       </div>
       <div id="chatPane" class="pane hidden">
         <div id="chatMessages">
