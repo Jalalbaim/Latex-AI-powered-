@@ -162,9 +162,128 @@ OLLAMA_MODEL=llama3.2:3b LATEX_ENGINE=xelatex npm start
 
 - **macOS**: `brew install node git ollama` and `brew install --cask mactex-no-gui`
   (MacTeX includes `latexmk` and `biber`). Then `ollama serve` / `ollama pull qwen2.5:3b`.
-- **Windows**: easiest is WSL2 (Ubuntu) and follow the Linux steps. Natively:
-  install Node.js from nodejs.org, [MiKTeX](https://miktex.org) or TeX Live
-  (MiKTeX needs Perl, e.g. Strawberry Perl, for `latexmk`), and Ollama from ollama.com.
+- **Windows**: see the next section.
+
+---
+
+## Running on Windows
+
+There are two ways. **Option A (WSL2) is recommended**: it is the same Linux
+setup the tool was built and tested on. Option B runs natively but is less tested.
+
+### Option A — WSL2 (recommended)
+
+WSL2 runs a real Ubuntu inside Windows. The server runs in Ubuntu and you use it
+from your normal Windows browser (WSL2 forwards `localhost` automatically).
+
+1. **Install WSL2 + Ubuntu.** Open **PowerShell as Administrator** and run:
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+   Restart when asked, then open **Ubuntu** from the Start menu and create a
+   Linux username and password.
+
+2. **Install Ollama on Windows** (not inside Ubuntu, so it can use your GPU):
+   download the installer from https://ollama.com/download/windows, run it, then
+   in PowerShell:
+   ```powershell
+   ollama pull qwen2.5:3b
+   ```
+   Ollama starts automatically in the system tray.
+
+3. **Inside the Ubuntu terminal**, follow steps 1, 2 and 4 of the
+   [Installation](#installation-step-by-step) section above (Node.js, TeX Live,
+   clone + `npm install`). Skip step 3 (Ollama), it is already installed on Windows.
+   Clone into your Linux home (`~/latex-ai`), not under `/mnt/c/...`: compiling
+   is much faster on the Linux file system.
+
+4. **Let Ubuntu reach the Windows Ollama.** By default Ollama on Windows only
+   listens on Windows' own `localhost`. Pick one:
+
+   - **Easiest (Windows 11 22H2+): mirrored networking.** Create the file
+     `C:\Users\<you>\.wslconfig` with:
+     ```ini
+     [wsl2]
+     networkingMode=mirrored
+     ```
+     then run `wsl --shutdown` in PowerShell and reopen Ubuntu. Now
+     `http://127.0.0.1:11434` works from Ubuntu with no further settings.
+
+   - **Otherwise:** in Windows, set the user environment variable
+     `OLLAMA_HOST` to `0.0.0.0` (Settings → System → About → Advanced system
+     settings → Environment Variables), quit and restart Ollama from the tray,
+     and allow it through the Windows Firewall if asked. Then start latex-ai
+     pointing at the Windows host:
+     ```bash
+     OLLAMA_URL="http://$(ip route show default | awk '{print $3}'):11434" npm start
+     ```
+
+   - **Alternative:** install Ollama *inside* Ubuntu instead
+     (`curl -fsSL https://ollama.com/install.sh | sh`) and skip this step.
+     Simpler networking, but GPU use inside WSL needs up-to-date NVIDIA drivers.
+
+   Check from Ubuntu: `curl http://127.0.0.1:11434/api/tags` (or the URL you set)
+   should print your models.
+
+5. **Run** in the Ubuntu terminal:
+   ```bash
+   cd ~/latex-ai
+   npm start
+   ```
+   and open **http://localhost:4321** in Edge / Chrome / Firefox on Windows.
+
+Tips:
+- Your projects are in `\\wsl$\Ubuntu\home\<linux-user>\latex-ai\projects` —
+  paste that into File Explorer to copy files in and out.
+- You can also open the folder in VS Code with `code .` from Ubuntu
+  (needs the "WSL" extension).
+
+### Option B — native Windows
+
+1. **Node.js 20+**: install the LTS version from https://nodejs.org
+   (keep "Add to PATH" ticked).
+2. **Git**: install from https://git-scm.com/download/win.
+3. **LaTeX**, choose one:
+   - **TeX Live** (https://tug.org/texlive/windows.html, run `install-tl-windows.exe`).
+     Includes `latexmk`, `biber` and Perl. Recommended.
+   - **MiKTeX** (https://miktex.org/download). `latexmk` additionally needs Perl:
+     install [Strawberry Perl](https://strawberryperl.com). In the MiKTeX Console,
+     enable *"Install missing packages on the fly: Always"*, otherwise compiles
+     hang waiting on a hidden dialog.
+4. **Ollama**: install from https://ollama.com/download/windows, then
+   `ollama pull qwen2.5:3b` in PowerShell.
+5. **Open a new PowerShell** (so the updated PATH is picked up) and check:
+   ```powershell
+   node -v; latexmk -v; ollama list
+   ```
+6. **Get the code and run:**
+   ```powershell
+   git clone https://github.com/Jalalbaim/Latex-AI-powered-.git latex-ai
+   cd latex-ai
+   npm install
+   npm start
+   ```
+   Open **http://localhost:4321**.
+
+Setting environment variables on Windows (the `VAR=value npm start` syntax is Linux/macOS only):
+
+```powershell
+# PowerShell
+$env:OLLAMA_MODEL="llama3.2:3b"; $env:LATEX_ENGINE="xelatex"; npm start
+```
+```bat
+:: Command Prompt (cmd.exe)
+set OLLAMA_MODEL=llama3.2:3b
+set LATEX_ENGINE=xelatex
+npm start
+```
+
+Known limitations of native Windows:
+- If a compile exceeds the time limit, the main `latexmk` process is stopped but
+  a child `pdflatex.exe` may keep running; end it in Task Manager if needed.
+- A console window may briefly flash while compiling.
+- If `latexmk` is "not found" although it is installed, the terminal was opened
+  before the install: close it and open a new one (or log out and back in).
 
 ---
 
