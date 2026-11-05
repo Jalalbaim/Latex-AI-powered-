@@ -20,8 +20,10 @@
       <select id="mainSelect" title="Main .tex file to compile"></select>
     </label>
     <button id="compileBtn" class="primary" title="Save all and compile (Ctrl+S)">Compile</button>
+    <button id="historyBtn" title="Version history: browse, compare and restore earlier versions">History</button>
     <span id="compileStatus" class="status"></span>
     <span class="spacer"></span>
+    <button id="ghostBtn" class="toggle" title="AI suggestions while you type (grey text). Tab accepts, Ctrl+→ accepts one word, Esc dismisses, Alt+\ asks for one.">Suggest</button>
     <button id="rewriteBtn" title="Rewrite the selected text with AI (Ctrl+Alt+E)">AI rewrite</button>
     <label class="field">Model
       <select id="modelSelect" title="Ollama model"></select>
@@ -50,7 +52,7 @@
     <section class="editor-col">
       <div class="panel-head">
         <span id="currentFile">No file open</span>
-        <span id="saveStatus" class="status"></span>
+        <span class="actions"><span id="aiStatus" class="status"></span><span id="saveStatus" class="status"></span></span>
       </div>
       <div id="editor"></div>
       <div id="problems" class="problems hidden">
@@ -127,6 +129,33 @@
         <span class="hint">You can edit the right side before accepting.</span>
         <button type="button" id="diffReject">Reject</button>
         <button type="button" id="diffAccept" class="primary" disabled>Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Version history -->
+  <div id="historyOverlay" class="overlay hidden">
+    <div class="dialog large">
+      <div class="dialog-head">
+        <span>Version history</span>
+        <span class="actions">
+          <button type="button" id="saveVersionBtn" title="Save the current state as a named version (kept forever)">Save version…</button>
+          <button type="button" id="historyClose" class="icon" title="Close (Esc)">×</button>
+        </span>
+      </div>
+      <div class="history-body">
+        <ul id="versionList" class="version-list"></ul>
+        <div class="history-detail">
+          <div class="history-toolbar">
+            <span id="historyInfo" class="status"></span>
+            <span class="spacer"></span>
+            <button type="button" id="restoreFileBtn" disabled>Restore this file</button>
+            <button type="button" id="restoreAllBtn" class="primary" disabled>Restore whole project</button>
+          </div>
+          <ul id="changeList" class="change-list"></ul>
+          <div class="diff-labels"><span>Selected version</span><span>Current</span></div>
+          <div id="historyDiff"></div>
+        </div>
       </div>
     </div>
   </div>

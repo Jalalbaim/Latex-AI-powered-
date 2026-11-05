@@ -24,6 +24,13 @@ machine: no account, no cloud, no API keys.
 - **AI rewrite** (Ctrl+Alt+E or right-click): rewrite the selection (or current
   paragraph) by instruction, review the change as a diff, then accept or reject
 - **Fix with AI** on each compile error: the model proposes a minimal fix, shown as a diff
+- **AI suggestions while you type** (ghost text): pause at the end of a line and the
+  model proposes how to continue; Tab accepts, Ctrl+→ accepts one word, Esc dismisses.
+  Suggestions never include made-up `\cite`/`\ref` keys.
+- **Version history**: a version is saved on every compile (when something changed),
+  before every accepted AI edit and before every restore. Compare any version with
+  your current files and restore one file or the whole project. Name a version (★)
+  to keep it forever.
 - Multiple projects, file upload (images, `.bib`, `.sty`, ...)
 
 ---
@@ -145,6 +152,10 @@ to get started.
 | AI rewrite | Select text, then Ctrl+Alt+E or right-click → AI rewrite |
 | Chat | Assistant tab (tick "include selection" to send the selected text) |
 | Fix an error | Click **Fix with AI** next to a compile error |
+| AI suggestions | Toggle **Suggest** in the top bar; Tab accepts, Ctrl+→ one word, Esc dismisses |
+| Ask for a suggestion now | Alt+\ (works anywhere, even when Suggest is off) |
+| Version history | **History** button: pick a version, click a file to compare, then restore |
+| Name a version | History → **Save version…**, or ☆ on any version |
 
 Projects live in `projects/<name>/` (inside the repo folder by default). Build
 output (PDF, logs, aux files) goes to `projects/<name>/.build/`. You can copy
@@ -152,6 +163,10 @@ existing LaTeX projects into `projects/` and they will show up in the UI.
 The main file is `main.tex`.
 
 Only `projects/example/` is tracked by Git; your other projects stay local.
+
+Version history is stored inside each project in a hidden `.history/` folder
+(identical files are stored once). The 150 most recent unnamed versions are kept;
+named versions are never deleted automatically. Delete `.history/` to clear it.
 
 ---
 
@@ -314,6 +329,7 @@ Known limitations of native Windows:
 | AI says it cannot reach Ollama | Start it: `ollama serve` (or `sudo systemctl start ollama`) |
 | Model not found | `ollama pull <model>`; list installed models with `ollama list` |
 | AI is very slow | Use a smaller model (`qwen2.5:3b`), or lower `OLLAMA_NUM_CTX` |
+| Suggestions take long / slow the machine | Turn **Suggest** off and use Alt+\ only when you want one. The first suggestion after starting is slow while the model loads |
 | Port already in use | `PORT=5000 npm start` |
 | Blank editor / PDF viewer | Run `npm install` (the editor is served from `node_modules`) |
 | `Forbidden host` | Open the app via `http://localhost:4321`, not via an IP address |

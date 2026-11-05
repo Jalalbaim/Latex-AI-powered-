@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -396,6 +397,136 @@ function buildZip(entries) {
   return Buffer.concat([...locals, ...centrals, end]);
 }
 
+// ---------- version history ----------
+// Snapshots live in <project>/.history: file contents are stored once per unique
+// content (objects/<sha256>), and each snapshot is a small JSON manifest.
+
+const HISTORY_DIR = '.history';
+const HISTORY_MAX_AUTO = 150; // unlabeled snapshots kept per project
+const HISTORY_MAX_FILE = 25_000_000; // larger files are not versioned
+const historyLocks = new Map();
+
+function historyPaths(dir) {
+  const root = path.join(dir, HISTORY_DIR);
+  return { root, objects: path.join(root, 'objects'), snaps: path.join(root, 'snapshots') };
+}
+
+// Serializes history operations per project.
+function withHistoryLock(dir, fn) {
+  const prev = historyLocks.get(dir) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  historyLocks.set(dir, next);
+  next.finally(() => historyLocks.get(dir) === next && historyLocks.delete(dir)).catch(() => {});
+  return next;
+}
+
+async function readManifests(dir) {
+  const { snaps } = historyPaths(dir);
+  let names = [];
+  try {
+    names = (await fs.readdir(snaps)).filter((n) => n.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const n of names) {
+    try {
+      out.push(JSON.parse(await fs.readFile(path.join(snaps, n), 'utf8')));
+    } catch {
+      // ignore a damaged manifest
+    }
+  }
+  return out.sort((a, b) => b.time - a.time || (b.id < a.id ? -1 : 1));
+}
+
+async function readManifest(dir, id) {
+  if (typeof id !== 'string' || !/^[0-9a-z-]{10,40}$/.test(id)) throw new HttpError(400, 'Invalid version id.');
+  try {
+    return JSON.parse(await fs.readFile(path.join(historyPaths(dir).snaps, `${id}.json`), 'utf8'));
+  } catch {
+    throw new HttpError(404, 'Version not found.');
+  }
+}
+
+// Hashes every project file (skipping hidden ones). Returns { files: {path: hash}, skipped: [path] }.
+async function scanProject(dir, storeObjects) {
+  const { objects } = historyPaths(dir);
+  const files = {};
+  const skipped = [];
+  if (storeObjects) await fs.mkdir(objects, { recursive: true });
+  for (const f of await listFiles(dir)) {
+    if (f.type !== 'file') continue;
+    const abs = path.join(dir, f.path);
+    const st = await fs.stat(abs).catch(() => null);
+    if (!st) continue;
+    if (st.size > HISTORY_MAX_FILE) {
+      skipped.push(f.path);
+      continue;
+    }
+    const data = await fs.readFile(abs);
+    const hash = crypto.createHash('sha256').update(data).digest('hex');
+    files[f.path] = hash;
+    if (storeObjects) {
+      const obj = path.join(objects, hash);
+      if (!(await exists(obj))) {
+        const tmp = `${obj}.${process.pid}.tmp`;
+        await fs.writeFile(tmp, data);
+        await fs.rename(tmp, obj);
+      }
+    }
+  }
+  return { files, skipped };
+}
+
+const sameFiles = (a, b) => {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
+};
+
+function newSnapshotId() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return (
+    `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}` +
+    `-${p(d.getMilliseconds(), 3)}${Math.random().toString(36).slice(2, 6)}`
+  );
+}
+
+// Creates a snapshot unless nothing changed since the last one (labeled snapshots are always created).
+function createSnapshot(dir, { reason = 'Manual', label = '' } = {}) {
+  return withHistoryLock(dir, async () => {
+    const { snaps } = historyPaths(dir);
+    const { files, skipped } = await scanProject(dir, true);
+    const manifests = await readManifests(dir);
+    const last = manifests[0];
+    if (!label && last && sameFiles(last.files, files)) return { created: false, snapshot: last };
+    const snapshot = { id: newSnapshotId(), time: Date.now(), reason: clip(reason, 80), label: clip(label, 120), files, skipped };
+    await fs.mkdir(snaps, { recursive: true });
+    await fs.writeFile(path.join(snaps, `${snapshot.id}.json`), JSON.stringify(snapshot));
+    await pruneHistory(dir, [snapshot, ...manifests]);
+    return { created: true, snapshot };
+  });
+}
+
+// Drops the oldest unlabeled snapshots beyond the limit, then unreferenced objects.
+async function pruneHistory(dir, manifests) {
+  const { objects, snaps } = historyPaths(dir);
+  const auto = manifests.filter((m) => !m.label);
+  const drop = auto.slice(HISTORY_MAX_AUTO);
+  if (!drop.length) return;
+  for (const m of drop) await fs.rm(path.join(snaps, `${m.id}.json`), { force: true });
+  const keep = new Set();
+  for (const m of manifests) if (!drop.includes(m)) for (const h of Object.values(m.files)) keep.add(h);
+  for (const name of await fs.readdir(objects).catch(() => [])) {
+    if (!keep.has(name)) await fs.rm(path.join(objects, name), { force: true });
+  }
+}
+
+async function readObject(dir, hash) {
+  if (!/^[0-9a-f]{64}$/.test(hash)) throw new HttpError(400, 'Invalid object.');
+  return fs.readFile(path.join(historyPaths(dir).objects, hash));
+}
+
 // ---------- Ollama ----------
 
 const SYSTEM_BASE =
@@ -760,6 +891,132 @@ app.get(
   }),
 );
 
+// ----- version history -----
+
+async function existingProject(name) {
+  const dir = projectDir(name);
+  if (!(await exists(dir))) throw new HttpError(404, 'Project not found.');
+  return dir;
+}
+
+app.get(
+  '/api/projects/:project/history',
+  wrap(async (req, res) => {
+    const dir = await existingProject(req.params.project);
+    const manifests = await readManifests(dir);
+    const versions = manifests.map((m, i) => {
+      const prev = manifests[i + 1]?.files || {};
+      let added = 0;
+      let changed = 0;
+      let removed = 0;
+      for (const [p, h] of Object.entries(m.files)) {
+        if (!(p in prev)) added++;
+        else if (prev[p] !== h) changed++;
+      }
+      for (const p of Object.keys(prev)) if (!(p in m.files)) removed++;
+      return { id: m.id, time: m.time, reason: m.reason, label: m.label, files: Object.keys(m.files).length, added, changed, removed };
+    });
+    res.json({ versions });
+  }),
+);
+
+app.post(
+  '/api/projects/:project/history',
+  json,
+  wrap(async (req, res) => {
+    const dir = await existingProject(req.params.project);
+    const { created, snapshot } = await createSnapshot(dir, {
+      reason: typeof req.body?.reason === 'string' ? req.body.reason : 'Manual',
+      label: typeof req.body?.label === 'string' ? req.body.label.trim() : '',
+    });
+    res.json({ created, id: snapshot.id });
+  }),
+);
+
+app.patch(
+  '/api/projects/:project/history/:id',
+  json,
+  wrap(async (req, res) => {
+    const dir = await existingProject(req.params.project);
+    await withHistoryLock(dir, async () => {
+      const m = await readManifest(dir, req.params.id);
+      m.label = clip(typeof req.body?.label === 'string' ? req.body.label.trim() : '', 120);
+      await fs.writeFile(path.join(historyPaths(dir).snaps, `${m.id}.json`), JSON.stringify(m));
+    });
+    res.json({ ok: true });
+  }),
+);
+
+// What differs between a version and the files on disk now.
+app.get(
+  '/api/projects/:project/history/:id/changes',
+  wrap(async (req, res) => {
+    const dir = await existingProject(req.params.project);
+    const m = await readManifest(dir, req.params.id);
+    const { files: now } = await scanProject(dir, false);
+    const changes = [];
+    for (const [p, h] of Object.entries(m.files)) {
+      if (!(p in now)) changes.push({ path: p, status: 'deleted' });
+      else if (now[p] !== h) changes.push({ path: p, status: 'modified' });
+    }
+    for (const p of Object.keys(now)) if (!(p in m.files)) changes.push({ path: p, status: 'added' });
+    changes.sort((a, b) => a.path.localeCompare(b.path));
+    for (const c of changes) c.text = TEXT_EXTENSIONS.has(path.extname(c.path).toLowerCase());
+    res.json({ changes, files: Object.keys(m.files).sort() });
+  }),
+);
+
+app.get(
+  '/api/projects/:project/history/:id/file',
+  wrap(async (req, res) => {
+    const dir = await existingProject(req.params.project);
+    const m = await readManifest(dir, req.params.id);
+    const p = typeof req.query.path === 'string' ? req.query.path : '';
+    if (!m.files[p]) throw new HttpError(404, 'This file does not exist in that version.');
+    const data = await readObject(dir, m.files[p]);
+    res.setHeader('cache-control', 'no-store');
+    if (TEXT_EXTENSIONS.has(path.extname(p).toLowerCase())) res.type('text/plain').send(data.toString('utf8'));
+    else res.type('application/octet-stream').send(data);
+  }),
+);
+
+// Restores the whole project, or one file, to a version. A safety snapshot is taken first.
+app.post(
+  '/api/projects/:project/history/:id/restore',
+  json,
+  wrap(async (req, res) => {
+    const name = req.params.project;
+    const dir = await existingProject(name);
+    if (compileLocks.has(name)) throw new HttpError(409, 'Wait for the compile to finish.');
+    const m = await readManifest(dir, req.params.id);
+    const only = typeof req.body?.path === 'string' && req.body.path ? req.body.path : null;
+    await createSnapshot(dir, { reason: 'Before restore' });
+    const result = await withHistoryLock(dir, async () => {
+      const restored = [];
+      const deleted = [];
+      const { files: now } = await scanProject(dir, false);
+      const targets = only ? [only] : [...new Set([...Object.keys(m.files), ...Object.keys(now)])];
+      for (const p of targets) {
+        if (m.skipped?.includes(p)) continue; // too large to be versioned: leave it alone
+        const abs = await resolveInProject(dir, p);
+        const hash = m.files[p];
+        if (!hash) {
+          if (p in now || (only && (await exists(abs)))) {
+            await fs.rm(abs, { force: true });
+            deleted.push(p);
+          }
+        } else if (now[p] !== hash) {
+          await fs.mkdir(path.dirname(abs), { recursive: true });
+          await fs.writeFile(abs, await readObject(dir, hash));
+          restored.push(p);
+        }
+      }
+      return { restored, deleted };
+    });
+    res.json({ ok: true, ...result });
+  }),
+);
+
 app.post(
   '/api/projects/:project/compile',
   json,
@@ -769,6 +1026,8 @@ app.post(
     const main = req.body?.main || 'main.tex';
     // One compile per project at a time; later requests wait for the running one.
     while (compileLocks.has(name)) await compileLocks.get(name).catch(() => {});
+    // Every compile records a version (only when something changed since the last one).
+    await createSnapshot(dir, { reason: 'Compile' }).catch((err) => console.error('history:', err.message));
     const job = compileProject(dir, main);
     compileLocks.set(name, job);
     try {
@@ -883,6 +1142,73 @@ function repairLatexEscapes(text, documentText) {
 }
 
 // Suggest a fix for one compile error. Returns a line-range replacement.
+// Inline "ghost text" completion. Uses native fill-in-the-middle when the model
+// supports it, otherwise plain text continuation (which instruct models do well).
+const fimUnsupported = new Set();
+
+// Common abbreviations that end with a dot but do not end a sentence.
+const SENTENCE_END = /(?<!\b(?:e\.g|i\.e|al|etc|Fig|Figs|Eq|Eqs|Sec|Tab|Ref|vs|cf|resp|approx|[A-Za-z]))[.!?](?=\s|$)/;
+
+function tidyCompletion(text, before, after) {
+  let t = String(text).replace(/\r/g, '');
+  t = t.replace(/^\s*```[\w-]*\n?/, '').replace(/```[\s\S]*$/, '');
+  if (before === '' || /\n[ \t]*$/.test(before)) t = t.replace(/^\s*\n/, '');
+  const nl = t.indexOf('\n');
+  if (nl >= 0) t = t.slice(0, nl);
+  // Small models happily invent citation keys and labels: stop before any of them,
+  // and drop the words that lead into the citation ("see", "e.g.", "~", "(").
+  const ref = /\\(?:[a-zA-Z]*cite[a-zA-Z]*|[cC]?ref|eqref|autoref|pageref|nameref)\*?\s*[[{]/.exec(t);
+  if (ref) {
+    t = t
+      .slice(0, ref.index)
+      .replace(/(?:[\s~(,;]|\b(?:see|cf\.?|e\.g\.,?|i\.e\.,?|in|by|from|and|as|of|to|the|Section|Sec\.|Figure|Fig\.|Table|Eq\.|Equation))*$/i, '');
+  }
+  const end = SENTENCE_END.exec(t);
+  if (end && end.index >= 8) t = t.slice(0, end.index + 1);
+  if (/\s$/.test(before)) t = t.replace(/^[ \t]+/, '');
+  const rest = after.split('\n')[0].trim();
+  t = t.trimEnd();
+  if (rest && t.endsWith(rest)) t = t.slice(0, -rest.length).trimEnd();
+  if (t.length > 220) t = t.slice(0, 220).replace(/\s+\S*$/, '');
+  return t.trim() ? t : '';
+}
+
+app.post(
+  '/api/ai/complete',
+  json,
+  wrap(async (req, res) => {
+    const { before = '', after = '' } = req.body || {};
+    const model = typeof req.body?.model === 'string' && req.body.model ? req.body.model : DEFAULT_MODEL;
+    if (typeof before !== 'string' || typeof after !== 'string' || !before.trim()) return res.json({ text: '' });
+    const ac = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) ac.abort();
+    });
+    // The client sends a prefix whose start stays fixed while the user types, so
+    // Ollama can reuse its prompt cache. Keep num_ctx equal to the chat's to avoid model reloads.
+    const prompt = before.slice(-10000);
+    const suffix = after.slice(0, 1500);
+    const options = { num_predict: 32, temperature: 0.2, top_p: 0.9, num_ctx: NUM_CTX, stop: ['\n\n', '\\end{document}'] };
+    let upstream = null;
+    try {
+      if (suffix.trim() && !fimUnsupported.has(model)) {
+        try {
+          upstream = await ollamaFetch('/api/generate', { model, prompt, suffix, stream: false, options }, ac.signal);
+        } catch (err) {
+          if (!/does not support insert/i.test(err.message)) throw err;
+          fimUnsupported.add(model);
+        }
+      }
+      upstream ||= await ollamaFetch('/api/generate', { model, prompt, raw: true, stream: false, options }, ac.signal);
+      const data = await upstream.json();
+      res.json({ text: tidyCompletion(data.response || '', before, after) });
+    } catch (err) {
+      if (err.name === 'AbortError') return res.end();
+      throw err;
+    }
+  }),
+);
+
 app.post(
   '/api/ai/fix',
   json,

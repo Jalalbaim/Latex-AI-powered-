@@ -204,3 +204,36 @@ a.button:hover { background: var(--hover); }
 .outline li.empty-note { color: var(--muted); cursor: default; }
 .outline li.empty-note:hover { background: none; }
 .monaco-editor .sync-line { background: rgba(255, 196, 0, .28); }
+
+/* ghost-text toggle */
+button.toggle.on { border-color: var(--accent); color: var(--accent); }
+button.toggle.on::before { content: "● "; font-size: 10px; vertical-align: 1px; }
+
+/* version history */
+.history-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; }
+.version-list { list-style: none; margin: 0; padding: 0; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.version-list li { padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; font-size: 13px; }
+.version-list li:hover { background: var(--hover); }
+.version-list li.active { background: var(--user-bubble); }
+.version-list .when { font-weight: 600; }
+.version-list .why { color: var(--muted); grid-column: 1; }
+.version-list .label { color: var(--accent); font-weight: 600; grid-column: 1 / -1; }
+.version-list .stats { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; grid-column: 1; }
+.version-list .star { grid-column: 2; grid-row: 1; border: none; background: none; padding: 0 2px; color: var(--muted); }
+.version-list .star.kept { color: var(--warn); }
+.version-list .empty-note { color: var(--muted); cursor: default; display: block; }
+.history-detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; }
+.history-toolbar { display: flex; gap: 8px; align-items: center; }
+.change-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 96px; overflow: auto; }
+.change-list li { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; }
+.change-list li:hover { background: var(--hover); }
+.change-list li.active { border-color: var(--accent); background: var(--user-bubble); }
+.change-list li .st { font-weight: 700; margin-right: 4px; }
+.change-list li.modified .st { color: var(--warn); }
+.change-list li.added .st { color: var(--ok); }
+.change-list li.deleted .st { color: var(--error); }
+.change-list li.note { border: none; cursor: default; color: var(--muted); padding-left: 0; }
+.diff-labels { display: grid; grid-template-columns: 1fr 1fr; font-size: 12px; color: var(--muted); }
+#historyDiff { flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.history-message { padding: 16px; color: var(--muted); }
+@media (max-width: 900px) { .history-body { grid-template-columns: 1fr; grid-template-rows: 160px 1fr; } }

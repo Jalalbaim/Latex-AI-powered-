@@ -200,6 +200,10 @@ function createEditor() {
     fontSize: 14,
     scrollBeyondLastLine: false,
     unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false },
+    inlineSuggest: { enabled: true },
+    // Word-based suggestions pop up constantly in prose and hide the AI ghost text;
+    // LaTeX-aware suggestions come from latex-intel.js instead.
+    wordBasedSuggestions: 'off',
   });
   darkQuery.addEventListener('change', () => monaco.editor.setTheme(themeName()));
 
@@ -234,6 +238,16 @@ function createEditor() {
     },
   });
 
+  editor.addAction({
+    id: 'latexai.suggest',
+    label: 'AI: Suggest a continuation',
+    keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.Backslash],
+    contextMenuGroupId: '0_ai',
+    contextMenuOrder: 0,
+    run: () => editor.trigger('latex-ai', 'editor.action.inlineSuggest.trigger', {}),
+  });
+  registerGhostText();
+
   registerLatexCompletion(monaco, {
     files: () => state.files,
     sources: sourceEntries,
@@ -244,6 +258,296 @@ function createEditor() {
     clearTimeout(cursorTimer);
     cursorTimer = setTimeout(updateOutlineActive, 150);
   });
+}
+
+// ---------- AI ghost text (inline suggestions) ----------
+
+const ghost = { enabled: store.get('latexai.ghost', '1') === '1', seq: 0 };
+
+function renderGhostToggle() {
+  const b = $('ghostBtn');
+  b.classList.toggle('on', ghost.enabled);
+  b.setAttribute('aria-pressed', String(ghost.enabled));
+}
+
+function registerGhostText() {
+  const Explicit = monaco.languages.InlineCompletionTriggerKind.Explicit;
+  const none = { items: [] };
+  const provider = {
+    async provideInlineCompletions(model, position, context, token) {
+      const explicit = context.triggerKind === Explicit;
+      if ((!explicit && !ghost.enabled) || !currentModelName() || !editor.getSelection().isEmpty()) return none;
+      const line = model.getLineContent(position.lineNumber);
+      const before = line.slice(0, position.column - 1);
+      const after = line.slice(position.column - 1);
+      if (!explicit) {
+        // Only suggest at the end of a line (closing braces/brackets may follow),
+        // not while a command name is being typed, and not on near-empty lines.
+        if (!/^[\s})\]$]*$/.test(after)) return none;
+        if (before.trim().length < 4 || /\\[a-zA-Z@]*$/.test(before) || /^\s*%/.test(before)) return none;
+        await new Promise((r) => setTimeout(r, 650)); // wait for a pause in typing
+        if (token.isCancellationRequested) return none;
+      }
+      const full = model.getValue();
+      const off = model.getOffsetAt(position);
+      // Prompt start moves in 2000-character steps so Ollama can reuse its cache.
+      const start = Math.floor(Math.max(0, off - 6000) / 2000) * 2000;
+      const ac = new AbortController();
+      const sub = token.onCancellationRequested(() => ac.abort());
+      const seq = ++ghost.seq;
+      setStatus('aiStatus', 'AI suggesting…');
+      try {
+        const { text } = await api(
+          'POST',
+          '/api/ai/complete',
+          { model: currentModelName(), before: full.slice(start, off), after: full.slice(off, off + 1500) },
+          { signal: ac.signal },
+        );
+        if (!text || token.isCancellationRequested) return none;
+        const at = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
+        return { items: [{ insertText: text, range: at }] };
+      } catch (e) {
+        if (e.name !== 'AbortError' && explicit) setStatus('aiStatus', e.message, 'error');
+        return none;
+      } finally {
+        sub.dispose();
+        if (seq === ghost.seq && $('aiStatus').textContent === 'AI suggesting…') setStatus('aiStatus', '');
+      }
+    },
+    freeInlineCompletions() {},
+  };
+  monaco.languages.registerInlineCompletionsProvider('latex', provider);
+}
+
+// ---------- version history ----------
+
+const hist = { versions: [], selected: null, changes: [], file: null, diff: null, models: [] };
+
+function timeAgo(t) {
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  const d = new Date(t);
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+}
+
+async function openHistory() {
+  if (!state.project) return;
+  await saveAll().catch(() => {});
+  $('historyOverlay').classList.remove('hidden');
+  hist.selected = null;
+  await loadVersions();
+  if (hist.versions.length) await selectVersion(hist.versions[0].id);
+  else showHistoryMessage('No versions yet. A version is saved each time you compile, before AI edits are applied, and when you click "Save version…".');
+}
+
+function closeHistory() {
+  $('historyOverlay').classList.add('hidden');
+  editor.focus();
+}
+
+async function loadVersions() {
+  const { versions } = await api('GET', `${P()}/history`);
+  hist.versions = versions;
+  renderVersions();
+}
+
+function renderVersions() {
+  const ul = $('versionList');
+  if (!hist.versions.length) {
+    const li = document.createElement('li');
+    li.className = 'empty-note';
+    li.textContent = 'No versions yet.';
+    return ul.replaceChildren(li);
+  }
+  ul.replaceChildren(
+    ...hist.versions.map((v) => {
+      const li = document.createElement('li');
+      li.classList.toggle('active', v.id === hist.selected);
+      li.title = new Date(v.time).toLocaleString();
+      const when = document.createElement('span');
+      when.className = 'when';
+      when.textContent = timeAgo(v.time);
+      const star = document.createElement('button');
+      star.className = `star${v.label ? ' kept' : ''}`;
+      star.textContent = v.label ? '★' : '☆';
+      star.title = v.label ? 'Named version (kept forever). Click to remove the name.' : 'Name this version so it is kept forever';
+      star.addEventListener('click', (e) => {
+        e.stopPropagation();
+        labelVersion(v);
+      });
+      li.append(when, star);
+      if (v.label) {
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = v.label;
+        li.append(label);
+      }
+      const why = document.createElement('span');
+      why.className = 'why';
+      why.textContent = v.reason;
+      const stats = document.createElement('span');
+      stats.className = 'stats';
+      const parts = [];
+      if (v.added) parts.push(`+${v.added}`);
+      if (v.changed) parts.push(`~${v.changed}`);
+      if (v.removed) parts.push(`−${v.removed}`);
+      stats.textContent = `${v.files} file${v.files === 1 ? '' : 's'}${parts.length ? ` · ${parts.join(' ')}` : ''}`;
+      stats.title = 'Compared with the previous version: + added, ~ changed, − removed';
+      li.append(why, stats);
+      li.addEventListener('click', () => selectVersion(v.id).catch((e) => alert(e.message)));
+      return li;
+    }),
+  );
+}
+
+async function labelVersion(v) {
+  const label = v.label ? '' : prompt('Name for this version (named versions are never deleted automatically):', '');
+  if (label === null) return;
+  try {
+    await api('PATCH', `${P()}/history/${v.id}`, { label: label.trim() });
+    await loadVersions();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function saveVersion() {
+  const label = prompt('Name for this version (e.g. "Submitted draft"):', '');
+  if (label === null) return;
+  try {
+    await saveAll();
+    await api('POST', `${P()}/history`, { reason: 'Saved by you', label: label.trim() || 'Saved version' });
+    await loadVersions();
+    await selectVersion(hist.versions[0].id);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function selectVersion(id) {
+  hist.selected = id;
+  renderVersions();
+  const { changes } = await api('GET', `${P()}/history/${id}/changes`);
+  if (hist.selected !== id) return;
+  hist.changes = changes;
+  const v = hist.versions.find((x) => x.id === id);
+  $('historyInfo').textContent = `${new Date(v.time).toLocaleString()} · ${v.reason}`;
+  $('restoreAllBtn').disabled = !changes.length;
+  const ul = $('changeList');
+  if (!changes.length) {
+    const li = document.createElement('li');
+    li.className = 'note';
+    li.textContent = 'This version is identical to your current files.';
+    ul.replaceChildren(li);
+    hist.file = null;
+    $('restoreFileBtn').disabled = true;
+    return showHistoryMessage('Nothing to compare.');
+  }
+  const label = { modified: '~', added: '+', deleted: '−' };
+  const tip = {
+    modified: 'changed since this version',
+    added: 'did not exist in this version',
+    deleted: 'deleted since this version',
+  };
+  ul.replaceChildren(
+    ...changes.map((c) => {
+      const li = document.createElement('li');
+      li.className = c.status;
+      li.dataset.path = c.path;
+      li.title = `${c.path}: ${tip[c.status]}`;
+      const st = document.createElement('span');
+      st.className = 'st';
+      st.textContent = label[c.status];
+      li.append(st, c.path);
+      li.addEventListener('click', () => selectHistoryFile(c.path).catch((e) => alert(e.message)));
+      return li;
+    }),
+  );
+  const keep = changes.find((c) => c.path === hist.file) || changes.find((c) => c.path === state.current) || changes[0];
+  await selectHistoryFile(keep.path);
+}
+
+function showHistoryMessage(text) {
+  hist.diff?.setModel(null);
+  for (const m of hist.models) m.dispose();
+  hist.models = [];
+  const box = $('historyDiff');
+  hist.diff?.dispose();
+  hist.diff = null;
+  box.innerHTML = '';
+  const p = document.createElement('p');
+  p.className = 'history-message';
+  p.textContent = text;
+  box.append(p);
+}
+
+async function selectHistoryFile(path) {
+  hist.file = path;
+  for (const li of $('changeList').children) li.classList.toggle('active', li.dataset.path === path);
+  const c = hist.changes.find((x) => x.path === path);
+  $('restoreFileBtn').disabled = false;
+  $('restoreFileBtn').textContent = c.status === 'added' ? 'Delete this file' : 'Restore this file';
+  if (!c.text) return showHistoryMessage(`"${path}" is not a text file, so it cannot be shown. You can still restore it.`);
+  const id = hist.selected;
+  const [oldText, newText] = await Promise.all([
+    c.status === 'added' ? '' : api('GET', `${P()}/history/${id}/file?${qp(path)}`),
+    c.status === 'deleted' ? '' : api('GET', `${P()}/file?${qp(path)}`),
+  ]);
+  if (hist.selected !== id || hist.file !== path) return;
+  if (!hist.diff) {
+    $('historyDiff').innerHTML = '';
+    hist.diff = monaco.editor.createDiffEditor($('historyDiff'), {
+      automaticLayout: true,
+      readOnly: true,
+      originalEditable: false,
+      wordWrap: 'on',
+      diffWordWrap: 'on',
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      renderOverviewRuler: false,
+    });
+  }
+  const lang = languageFor(path);
+  const original = monaco.editor.createModel(oldText, lang);
+  const modified = monaco.editor.createModel(newText, lang);
+  hist.diff.setModel({ original, modified });
+  for (const m of hist.models) m.dispose();
+  hist.models = [original, modified];
+}
+
+// After the server changed files on disk, bring open editors up to date (undoable).
+async function syncRestored({ restored = [], deleted = [] }) {
+  for (const p of deleted) forgetModels(p);
+  for (const p of restored) {
+    const model = state.models.get(p);
+    if (!model) continue;
+    const text = await api('GET', `${P()}/file?${qp(p)}`);
+    if (model.getValue() !== text) applyEdit(model, model.getFullModelRange(), text);
+  }
+  await saveAll().catch(() => {});
+  await refreshFiles();
+  if (!state.current && state.files.some((f) => f.path === state.main)) await openFile(state.main);
+}
+
+async function restoreFromHistory(onlyFile) {
+  const v = hist.versions.find((x) => x.id === hist.selected);
+  if (!v) return;
+  const what = onlyFile ? `"${hist.file}"` : 'the whole project';
+  const when = new Date(v.time).toLocaleString();
+  if (!confirm(`Restore ${what} to the version from ${when}?\n\nYour current state is saved as a version first, so you can undo this from History.`)) return;
+  try {
+    await saveAll();
+    const r = await api('POST', `${P()}/history/${v.id}/restore`, onlyFile ? { path: hist.file } : {});
+    await syncRestored(r);
+    const n = r.restored.length + r.deleted.length;
+    setStatus('compileStatus', `Restored ${n} file${n === 1 ? '' : 's'} from ${timeAgo(v.time)}`, 'ok');
+    await loadVersions();
+    await selectVersion(v.id);
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 // ---------- project sources (autocomplete + outline) ----------
@@ -1340,6 +1644,19 @@ function bindUI() {
     renderPdf();
     renderOutline();
   });
+  $('historyBtn').addEventListener('click', () => openHistory().catch((e) => alert(e.message)));
+  $('historyClose').addEventListener('click', closeHistory);
+  $('saveVersionBtn').addEventListener('click', saveVersion);
+  $('restoreFileBtn').addEventListener('click', () => restoreFromHistory(true));
+  $('restoreAllBtn').addEventListener('click', () => restoreFromHistory(false));
+  $('ghostBtn').addEventListener('click', () => {
+    ghost.enabled = !ghost.enabled;
+    store.set('latexai.ghost', ghost.enabled ? '1' : '0');
+    renderGhostToggle();
+    if (!ghost.enabled) editor.trigger('latex-ai', 'editor.action.inlineSuggest.hide', {});
+    editor.focus();
+  });
+  renderGhostToggle();
   $('newFolderBtn').addEventListener('click', newFolder);
   $('downloadZipBtn').addEventListener('click', downloadZip);
   $('syncBtn').addEventListener('click', syncToPdf);
@@ -1432,10 +1749,17 @@ function bindUI() {
   });
 
   // diff dialog
-  $('diffAccept').addEventListener('click', () => {
+  $('diffAccept').addEventListener('click', async () => {
     const accept = diff.onAccept;
     const text = diff.modified.getValue();
     closeDiff();
+    // Keep a version of the project as it was before the AI edit.
+    try {
+      await saveAll();
+      await api('POST', `${P()}/history`, { reason: 'Before AI edit' });
+    } catch {
+      // history is best-effort; never block the edit
+    }
     accept?.(text);
   });
   $('diffReject').addEventListener('click', closeDiff);
@@ -1469,6 +1793,7 @@ function bindUI() {
     if (e.key === 'Escape') {
       if (!$('promptOverlay').classList.contains('hidden')) $('promptOverlay').classList.add('hidden');
       else if (!$('diffOverlay').classList.contains('hidden')) closeDiff();
+      else if (!$('historyOverlay').classList.contains('hidden')) closeHistory();
     }
   });
   window.addEventListener('beforeunload', (e) => {
