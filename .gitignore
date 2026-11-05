@@ -1,0 +1,14 @@
+# Dependencies (reinstall with `npm install`)
+node_modules/
+
+# User projects: only the bundled example is tracked
+projects/*
+!projects/example/
+projects/**/.build/
+
+# OS / editor junk
+.DS_Store
+*.swp
+.vscode/
+.idea/
+npm-debug.log*

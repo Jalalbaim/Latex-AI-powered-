@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>latex-ai</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">latex-ai</span>
+    <label class="field">Project
+      <select id="projectSelect" title="Project"></select>
+    </label>
+    <button id="newProjectBtn" title="New project">New</button>
+    <span class="sep"></span>
+    <label class="field">Main
+      <select id="mainSelect" title="Main .tex file to compile"></select>
+    </label>
+    <button id="compileBtn" class="primary" title="Save all and compile (Ctrl+S)">Compile</button>
+    <span id="compileStatus" class="status"></span>
+    <span class="spacer"></span>
+    <button id="rewriteBtn" title="Rewrite the selected text with AI (Ctrl+Alt+E)">AI rewrite</button>
+    <label class="field">Model
+      <select id="modelSelect" title="Ollama model"></select>
+    </label>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="panel-head">
+        <span>Files</span>
+        <span class="actions">
+          <button id="newFileBtn" class="icon" title="New text file">+</button>
+          <button id="uploadBtn" class="icon" title="Upload files (images, .bib, …)">⇪</button>
+          <input id="uploadInput" type="file" multiple hidden>
+        </span>
+      </div>
+      <ul id="fileTree" class="file-tree"></ul>
+    </aside>
+
+    <section class="editor-col">
+      <div class="panel-head">
+        <span id="currentFile">No file open</span>
+        <span id="saveStatus" class="status"></span>
+      </div>
+      <div id="editor"></div>
+      <div id="problems" class="problems hidden">
+        <div class="panel-head"><span id="problemsTitle">Problems</span>
+          <button id="problemsClose" class="icon" title="Hide">×</button></div>
+        <ul id="problemList"></ul>
+      </div>
+    </section>
+
+    <section class="right-col">
+      <nav class="tabs">
+        <button data-tab="pdf" class="active">PDF</button>
+        <button data-tab="chat">Assistant</button>
+        <span class="spacer"></span>
+        <span id="pdfControls" class="actions">
+          <button id="zoomOut" class="icon" title="Zoom out">−</button>
+          <button id="zoomFit" title="Fit width">Fit</button>
+          <button id="zoomIn" class="icon" title="Zoom in">+</button>
+        </span>
+      </nav>
+      <div id="pdfPane" class="pane">
+        <div id="pdfContainer"><p class="empty">Compile to see the PDF.</p></div>
+      </div>
+      <div id="chatPane" class="pane hidden">
+        <div id="chatMessages">
+          <p class="empty">Ask about your document: “Suggest a better title”, “Explain this equation”, “Write a related-work paragraph outline”…</p>
+        </div>
+        <form id="chatForm">
+          <div class="chat-options">
+            <label><input type="checkbox" id="includeDoc" checked> Include current file</label>
+            <button type="button" id="clearChat" class="link">Clear chat</button>
+          </div>
+          <textarea id="chatInput" rows="3" placeholder="Message the assistant (Enter to send, Shift+Enter for a new line)"></textarea>
+          <div class="chat-buttons">
+            <button type="button" id="stopBtn" hidden>Stop</button>
+            <button type="submit" id="sendBtn" class="primary">Send</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <!-- Instruction prompt for "AI rewrite" -->
+  <div id="promptOverlay" class="overlay hidden">
+    <form id="promptForm" class="dialog small">
+      <div class="dialog-head">Rewrite selection</div>
+      <input id="promptInput" type="text" placeholder="e.g. make it more formal" autocomplete="off">
+      <div class="chips">
+        <button type="button" data-instr="Fix grammar and spelling only">Fix grammar</button>
+        <button type="button" data-instr="Improve clarity and flow">Improve clarity</button>
+        <button type="button" data-instr="Make it more concise">Shorten</button>
+        <button type="button" data-instr="Make it more formal and academic">More formal</button>
+        <button type="button" data-instr="Expand with more detail, without inventing facts or citations">Expand</button>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="promptCancel">Cancel</button>
+        <button type="submit" class="primary">Rewrite</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Diff review for rewrites and fixes -->
+  <div id="diffOverlay" class="overlay hidden">
+    <div class="dialog large">
+      <div class="dialog-head">
+        <span id="diffTitle">Review change</span>
+        <span id="diffStatus" class="status"></span>
+      </div>
+      <div id="diffInfo" class="diff-info"></div>
+      <div id="diffEditor"></div>
+      <div class="dialog-actions">
+        <span class="hint">You can edit the right side before accepting.</span>
+        <button type="button" id="diffReject">Reject</button>
+        <button type="button" id="diffAccept" class="primary" disabled>Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/vendor/monaco/vs/loader.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
