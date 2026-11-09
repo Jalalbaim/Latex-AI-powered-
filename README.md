@@ -9,17 +9,11 @@ machine: no account, no cloud, no API keys.
 - **Monaco editor** (the editor from VS Code) with LaTeX/BibTeX highlighting and auto-save
 - **Compile** with `latexmk` (Ctrl+S) and preview the PDF (rendered with PDF.js)
 - **Clickable errors and warnings** that jump to the offending line
-- **SyncTeX**: double-click in the PDF to jump to the source line; Ctrl+Alt+J
-  (or "⇥ Cursor") highlights the cursor's position in the PDF
-- **Autocomplete**: commands and snippets after `\`, environments after
-  `\begin{` (with the matching `\end{}`), labels in `\ref{}`, BibTeX keys in
-  `\cite{}` (with title/author), image and `.tex` paths, package names, and your
-  own `\newcommand`s
-- **Outline** of the document (sections across all `\input`/`\include` files),
-  click to jump; follows the cursor
-- **File management**: folders, rename/move (✎ or drag & drop), drop files from
-  your computer onto a folder to upload, delete folders, rename/delete projects,
-  download the project as `.zip` or the PDF
+- **SyncTeX**: double-click in the PDF to jump to the source line
+- **Autocomplete**: commands and snippets after `\`, environments, labels in `\ref{}`, BibTeX keys in
+  `\cite{}`, image and `.tex` paths, package names, and your own `\newcommand`s
+- **Outline** of the document
+- **File management**
 - **Assistant** tab: chat about the current file, optionally including your selection
 - **AI rewrite** (Ctrl+Alt+E or right-click): rewrite the selection (or current
   paragraph) by instruction, review the change as a diff, then accept or reject
@@ -29,23 +23,24 @@ machine: no account, no cloud, no API keys.
   Suggestions never include made-up `\cite`/`\ref` keys.
 - **Version history**: a version is saved on every compile (when something changed),
   before every accepted AI edit and before every restore. Compare any version with
-  your current files and restore one file or the whole project. Name a version (★)
-  to keep it forever.
+  your current files and restore one file or the whole project.
 - Multiple projects, file upload (images, `.bib`, `.sty`, ...)
+- **Windows desktop icon**: one click starts everything in the background and opens
+  the editor. ([details](#one-click-launcher-desktop-icon))
 
 ---
 
 ## Requirements
 
-| Component | Version | Why it is needed |
-|---|---|---|
-| **Node.js** | 20 or newer (tested with 24) | Runs the web server (`server.js`) |
-| **npm** | comes with Node.js | Installs JavaScript dependencies |
-| **TeX Live** + **latexmk** | any recent | Compiles `.tex` to PDF |
-| **biber** / BibTeX | optional | Only if your documents use a bibliography |
-| **Ollama** | any recent | Runs the local AI model |
-| An Ollama **model** | e.g. `qwen2.5:3b` | The model that answers / rewrites |
-| **Git** | any | To clone the repository |
+| Component                  | Version                      | Why it is needed                          |
+| -------------------------- | ---------------------------- | ----------------------------------------- |
+| **Node.js**                | 20 or newer (tested with 24) | Runs the web server (`server.js`)         |
+| **npm**                    | comes with Node.js           | Installs JavaScript dependencies          |
+| **TeX Live** + **latexmk** | any recent                   | Compiles `.tex` to PDF                    |
+| **biber** / BibTeX         | optional                     | Only if your documents use a bibliography |
+| **Ollama**                 | any recent                   | Runs the local AI model                   |
+| An Ollama **model**        | e.g. `qwen2.5:3b`            | The model that answers / rewrites         |
+| **Git**                    | any                          | To clone the repository                   |
 
 Hardware: any machine works for LaTeX. For the AI, a 3B model runs on CPU with
 ~4 GB of free RAM; larger models (7B+) are much faster with a GPU.
@@ -62,17 +57,8 @@ The instructions below are for **Ubuntu / Debian**. Notes for macOS and Windows 
 sudo apt update
 sudo apt install -y git curl
 
-# Node.js 20+ (the version in Ubuntu's own repositories may be too old).
-# Option A: NodeSource
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
-
-# Option B: nvm (no sudo needed)
-# curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-# source ~/.bashrc && nvm install 22
-
-node -v    # must print v20 or higher
-npm -v
 ```
 
 ### 2. Install LaTeX (TeX Live + latexmk)
@@ -105,11 +91,11 @@ ollama pull qwen2.5:3b        # default model (~2 GB), fine on CPU
 
 Other models you can try (pick one in the UI or with `OLLAMA_MODEL`):
 
-| Model | Size | Notes |
-|---|---|---|
-| `qwen2.5:3b` | ~2 GB | Default, good balance on CPU |
-| `llama3.2:3b` | ~2 GB | Alternative small model |
-| `qwen2.5:7b` | ~4.7 GB | Better quality, needs more RAM / a GPU |
+| Model         | Size    | Notes                                  |
+| ------------- | ------- | -------------------------------------- |
+| `qwen2.5:3b`  | ~2 GB   | Default, good balance on CPU           |
+| `llama3.2:3b` | ~2 GB   | Alternative small model                |
+| `qwen2.5:7b`  | ~4.7 GB | Better quality, needs more RAM / a GPU |
 
 Check that Ollama is running: `curl http://127.0.0.1:11434/api/tags`
 (on Linux the installer starts it as a service; otherwise run `ollama serve`).
@@ -139,202 +125,61 @@ to get started.
 
 ## Usage
 
-| Action | How |
-|---|---|
-| Compile | Ctrl+S (also saves) or the Compile button |
-| PDF → source | Double-click in the PDF |
-| Source → PDF | Ctrl+Alt+J, right-click → Show in PDF, or "⇥ Cursor" above the PDF |
-| Autocomplete | Type `\`, `\ref{`, `\cite{`, `\begin{`, … (Ctrl+Space to open it manually) |
-| Rename / move | Hover a file or folder → ✎, or drag it onto a folder (empty area = project root) |
-| Upload | ⇪ button, or drag files from your computer onto a folder |
-| Download | ⤓ in Files (project `.zip`), ⤓ above the PDF (PDF only) |
-| Rename / delete project | ✎ / 🗑 next to the project selector |
-| AI rewrite | Select text, then Ctrl+Alt+E or right-click → AI rewrite |
-| Chat | Assistant tab (tick "include selection" to send the selected text) |
-| Fix an error | Click **Fix with AI** next to a compile error |
-| AI suggestions | Toggle **Suggest** in the top bar; Tab accepts, Ctrl+→ one word, Esc dismisses |
-| Ask for a suggestion now | Alt+\ (works anywhere, even when Suggest is off) |
-| Version history | **History** button: pick a version, click a file to compare, then restore |
-| Name a version | History → **Save version…**, or ☆ on any version |
-
-Projects live in `projects/<name>/` (inside the repo folder by default). Build
-output (PDF, logs, aux files) goes to `projects/<name>/.build/`. You can copy
-existing LaTeX projects into `projects/` and they will show up in the UI.
-The main file is `main.tex`.
-
-Only `projects/example/` is tracked by Git; your other projects stay local.
-
-Version history is stored inside each project in a hidden `.history/` folder
-(identical files are stored once). The 150 most recent unnamed versions are kept;
-named versions are never deleted automatically. Delete `.history/` to clear it.
-
----
-
-## Settings (environment variables)
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `PORT` | `4321` | Web UI port |
-| `HOST` | `127.0.0.1` | Listen address (keep it local) |
-| `OLLAMA_MODEL` | `qwen2.5:3b` | Default model (you can also pick one in the UI) |
-| `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server |
-| `OLLAMA_NUM_CTX` | `8192` | Context window sent to the model |
-| `LATEX_ENGINE` | `pdf` | `pdf`, `xelatex` or `lualatex` |
-| `COMPILE_TIMEOUT_MS` | `120000` | Compile time limit (ms) |
-| `LATEXAI_WORKSPACE` | `./projects` | Where projects are stored |
-
-Example:
-
-```bash
-OLLAMA_MODEL=llama3.2:3b LATEX_ENGINE=xelatex npm start
-```
-
----
-
-## Other operating systems
-
-- **macOS**: `brew install node git ollama` and `brew install --cask mactex-no-gui`
-  (MacTeX includes `latexmk` and `biber`). Then `ollama serve` / `ollama pull qwen2.5:3b`.
-- **Windows**: see the next section.
+| Action                   | How                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| Compile                  | Ctrl+S (also saves) or the Compile button                                        |
+| PDF → source             | Double-click in the PDF                                                          |
+| Source → PDF             | Ctrl+Alt+J, right-click → Show in PDF, or "⇥ Cursor" above the PDF               |
+| Autocomplete             | Type `\`, `\ref{`, `\cite{`, `\begin{`, … (Ctrl+Space to open it manually)       |
+| Rename / move            | Hover a file or folder → ✎, or drag it onto a folder (empty area = project root) |
+| Upload                   | ⇪ button, or drag files from your computer onto a folder                         |
+| Download                 | ⤓ in Files (project `.zip`), ⤓ above the PDF (PDF only)                          |
+| Rename / delete project  | ✎ / 🗑 next to the project selector                                              |
+| AI rewrite               | Select text, then Ctrl+Alt+E or right-click → AI rewrite                         |
+| Chat                     | Assistant tab (tick "include selection" to send the selected text)               |
+| Fix an error             | Click **Fix with AI** next to a compile error                                    |
+| AI suggestions           | Toggle **Suggest** in the top bar; Tab accepts, Ctrl+→ one word, Esc dismisses   |
+| Ask for a suggestion now | Alt+\ (works anywhere, even when Suggest is off)                                 |
+| Version history          | **History** button: pick a version, click a file to compare, then restore        |
+| Name a version           | History → **Save version…**, or ☆ on any version                                 |
 
 ---
 
 ## Running on Windows
 
-There are two ways. **Option A (WSL2) is recommended**: it is the same Linux
-setup the tool was built and tested on. Option B runs natively but is less tested.
-
-### Option A — WSL2 (recommended)
-
-WSL2 runs a real Ubuntu inside Windows. The server runs in Ubuntu and you use it
-from your normal Windows browser (WSL2 forwards `localhost` automatically).
+### Using WSL
 
 1. **Install WSL2 + Ubuntu.** Open **PowerShell as Administrator** and run:
+
    ```powershell
    wsl --install -d Ubuntu
    ```
-   Restart when asked, then open **Ubuntu** from the Start menu and create a
-   Linux username and password.
 
 2. **Install Ollama on Windows** (not inside Ubuntu, so it can use your GPU):
    download the installer from https://ollama.com/download/windows, run it, then
    in PowerShell:
+
    ```powershell
    ollama pull qwen2.5:3b
    ```
+
    Ollama starts automatically in the system tray.
 
-3. **Inside the Ubuntu terminal**, follow steps 1, 2 and 4 of the
-   [Installation](#installation-step-by-step) section above (Node.js, TeX Live,
-   clone + `npm install`). Skip step 3 (Ollama), it is already installed on Windows.
-   Clone into your Linux home (`~/latex-ai`), not under `/mnt/c/...`: compiling
-   is much faster on the Linux file system.
+3. **Inside the Ubuntu terminal**, follow steps 1, 2, 3, 4
 
-4. **Let Ubuntu reach the Windows Ollama.** By default Ollama on Windows only
-   listens on Windows' own `localhost`. Pick one:
+### One-click launcher (desktop icon)
 
-   - **Easiest (Windows 11 22H2+): mirrored networking.** Create the file
-     `C:\Users\<you>\.wslconfig` with:
-     ```ini
-     [wsl2]
-     networkingMode=mirrored
-     ```
-     then run `wsl --shutdown` in PowerShell and reopen Ubuntu. Now
-     `http://127.0.0.1:11434` works from Ubuntu with no further settings.
+With native Windows (Option B) you don't need to open a terminal or type
+`npm start` each time. Create a **LaTeX AI** icon once, then use it like any app.
 
-   - **Otherwise:** in Windows, set the user environment variable
-     `OLLAMA_HOST` to `0.0.0.0` (Settings → System → About → Advanced system
-     settings → Environment Variables), quit and restart Ollama from the tray,
-     and allow it through the Windows Firewall if asked. Then start latex-ai
-     pointing at the Windows host:
-     ```bash
-     OLLAMA_URL="http://$(ip route show default | awk '{print $3}'):11434" npm start
-     ```
-
-   - **Alternative:** install Ollama *inside* Ubuntu instead
-     (`curl -fsSL https://ollama.com/install.sh | sh`) and skip this step.
-     Simpler networking, but GPU use inside WSL needs up-to-date NVIDIA drivers.
-
-   Check from Ubuntu: `curl http://127.0.0.1:11434/api/tags` (or the URL you set)
-   should print your models.
-
-5. **Run** in the Ubuntu terminal:
-   ```bash
-   cd ~/latex-ai
-   npm start
-   ```
-   and open **http://localhost:4321** in Edge / Chrome / Firefox on Windows.
-
-Tips:
-- Your projects are in `\\wsl$\Ubuntu\home\<linux-user>\latex-ai\projects` —
-  paste that into File Explorer to copy files in and out.
-- You can also open the folder in VS Code with `code .` from Ubuntu
-  (needs the "WSL" extension).
-
-### Option B — native Windows
-
-1. **Node.js 20+**: install the LTS version from https://nodejs.org
-   (keep "Add to PATH" ticked).
-2. **Git**: install from https://git-scm.com/download/win.
-3. **LaTeX**, choose one:
-   - **TeX Live** (https://tug.org/texlive/windows.html, run `install-tl-windows.exe`).
-     Includes `latexmk`, `biber` and Perl. Recommended.
-   - **MiKTeX** (https://miktex.org/download). `latexmk` additionally needs Perl:
-     install [Strawberry Perl](https://strawberryperl.com). In the MiKTeX Console,
-     enable *"Install missing packages on the fly: Always"*, otherwise compiles
-     hang waiting on a hidden dialog.
-4. **Ollama**: install from https://ollama.com/download/windows, then
-   `ollama pull qwen2.5:3b` in PowerShell.
-5. **Open a new PowerShell** (so the updated PATH is picked up) and check:
-   ```powershell
-   node -v; latexmk -v; ollama list
-   ```
-6. **Get the code and run:**
-   ```powershell
-   git clone https://github.com/Jalalbaim/Latex-AI-powered-.git latex-ai
-   cd latex-ai
-   npm install
-   npm start
-   ```
-   Open **http://localhost:4321**.
-
-Setting environment variables on Windows (the `VAR=value npm start` syntax is Linux/macOS only):
+**Install the icon** (once, from the `latex-ai` folder):
 
 ```powershell
-# PowerShell
-$env:OLLAMA_MODEL="llama3.2:3b"; $env:LATEX_ENGINE="xelatex"; npm start
-```
-```bat
-:: Command Prompt (cmd.exe)
-set OLLAMA_MODEL=llama3.2:3b
-set LATEX_ENGINE=xelatex
-npm start
+powershell -ExecutionPolicy Bypass -File launcher\install-shortcut.ps1
 ```
 
-Known limitations of native Windows:
-- If a compile exceeds the time limit, the main `latexmk` process is stopped but
-  a child `pdflatex.exe` may keep running; end it in Task Manager if needed.
-- A console window may briefly flash while compiling.
-- If `latexmk` is "not found" although it is installed, the terminal was opened
-  before the install: close it and open a new one (or log out and back in).
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| `latexmk was not found` | Install step 2; check `which latexmk` |
-| `File 'xxx.sty' not found` | Install the missing TeX package (`texlive-latex-extra`, `texlive-science`, ...) or `texlive-full` |
-| AI says it cannot reach Ollama | Start it: `ollama serve` (or `sudo systemctl start ollama`) |
-| Model not found | `ollama pull <model>`; list installed models with `ollama list` |
-| AI is very slow | Use a smaller model (`qwen2.5:3b`), or lower `OLLAMA_NUM_CTX` |
-| Suggestions take long / slow the machine | Turn **Suggest** off and use Alt+\ only when you want one. The first suggestion after starting is slow while the model loads |
-| Port already in use | `PORT=5000 npm start` |
-| Blank editor / PDF viewer | Run `npm install` (the editor is served from `node_modules`) |
-| `Forbidden host` | Open the app via `http://localhost:4321`, not via an IP address |
-
----
+This creates a **LaTeX AI** shortcut on the Desktop and in the Start menu.
+Run it again if you move the `latex-ai` folder.
 
 ## Project structure
 
@@ -347,15 +192,11 @@ latex-ai/
 │   ├── app.js         # Editor, PDF viewer, SyncTeX, file tree, AI features (front-end)
 │   ├── latex-intel.js # Autocomplete, outline and project index (labels, citations, commands)
 │   └── style.css
+├── launcher/          # Windows one-click launcher (desktop icon)
+│   ├── install-shortcut.ps1  # Draws the icon and creates the Desktop / Start menu shortcut
+│   ├── run-hidden.vbs        # What the shortcut runs: starts start.ps1 with no window
+│   └── start.ps1             # Starts Ollama + server in the background, opens the browser
 └── projects/
     └── example/
         └── main.tex   # Sample project
 ```
-
-## Security notes
-
-- The server only listens on 127.0.0.1, accepts only `localhost` Host headers
-  (blocks DNS rebinding) and requires a custom header on state-changing requests
-  (blocks cross-site requests).
-- LaTeX runs with TeX Live's default restricted shell-escape. Only compile
-  documents you trust.
