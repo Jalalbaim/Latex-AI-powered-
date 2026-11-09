@@ -12,3 +12,7 @@ projects/**/.build/
 .vscode/
 .idea/
 npm-debug.log*
+
+# Windows launcher output
+launcher/logs/
+launcher/latex-ai.ico

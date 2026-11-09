@@ -1,19 +1,288 @@
 \documentclass[11pt]{article}
-\usepackage[T1]{fontenc}
-\usepackage{amsmath,amssymb}
-\usepackage{graphicx}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fix-cm}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{listings}
+\usepackage{xcolor}
 \usepackage{hyperref}
+\usepackage{graphicx} % Allows including images
+\usepackage{booktabs} % Allows the use of \toprule, \midrule and \bottomrule in tables
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{positioning, shapes, arrows, calc, decorations.pathreplacing, arrows.meta, backgrounds, patterns}
+\usepackage{etoolbox}
+\usepackage{animate}
 
-\title{test my own prism}
+\graphicspath{{figures/}}
+
+\definecolor{xblue} {HTML}{16607A}
+\definecolor{xred}  {HTML}{E8452C}
+\definecolor{xgray} {HTML}{5B6770}
+\definecolor{xlight}{HTML}{F3F6F8}
+\definecolor{xgreen}{HTML}{2E7D62}
+
+\newtheorem{definition}{Definition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\newcommand{\Ind}{\mathbf{1}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\X}{\mathcal{X}}
+\newcommand{\U}{\mathcal{U}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\Adv}{\mathrm{Adv}}
+\newcommand{\TPR}{\mathrm{TPR}}
+\newcommand{\FPR}{\mathrm{FPR}}
+\newcommand{\TV}{\mathrm{TV}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\Unif}{\mathrm{Unif}}
+\newcommand{\Bern}{\mathrm{Bern}}
+\newcommand{\Train}{\mathsf{Train}}
+\newcommand{\pref}{p_{\mathrm{ref}}}
+\newcommand{\kw}[1]{\textbf{#1}}
+\newcommand{\hl}[1]{\textbf{\textcolor{xred}{#1}}}
+
+\title{User-Level Inference Attacks}
 \author{}
-\date{\today}
+\date{}
 
 \begin{document}
 \maketitle
+  \begin{tikzpicture}[>={Stealth[round]},node distance=1.1cm,font=\small,
+      cell/.style={draw=xgray!70,minimum width=0.62cm,minimum height=0.55cm,inner sep=0pt,font=\scriptsize},
+      bg/.style={cell,fill=xgray!12},
+      usr/.style={cell,fill=xred!18,draw=xred},
+      qry/.style={cell,fill=xgreen!12,draw=xgreen,dashed}]
+    % ---------- MIA row ----------
+    \node[font=\normalsize] at (0,0) {\kw{MIA}};
+    \foreach \i in {0,...,6} \node[bg] (m\i) at (1.2+0.62*\i,0) {};
+    \node[usr] (m7) at (1.2+0.62*7,0) {$z$};
+    \node[font=\scriptsize,text=xgray,above=1pt of m3] {training set, size $n$};
+    \node[font=\scriptsize,text=xred,below=1pt of m7,align=center] {$z$ / $z_0$};
+    \node[qry,draw=xred,fill=xred!10] (mz) at (7.9,0) {$z$};
+    \node[font=\scriptsize,text=xgray,above=1pt of mz] {attacker holds};
+    \draw[xred,thick,densely dotted,->] (mz.west) -- (m7.east) node[midway,below,font=\scriptsize]{same};
+    \node[draw=xblue,fill=xblue!6,rounded corners,align=center,font=\footnotesize,text width=3.0cm] (qm) at (11.6,0)
+      {was \hl{this sample} used?};
+    % ---------- UIA row ----------
+    \begin{scope}[yshift=-2.1cm]
+      \node[font=\normalsize] at (0,0) {\kw{UIA}};
+      \foreach \i in {0,...,4} \node[bg] (u\i) at (1.2+0.62*\i,0) {};
+      \node[usr] (u5) at (1.2+0.62*5,0) {$Z_1$};
+      \node[usr] (u6) at (1.2+0.62*6,0) {$\cdots$};
+      \node[usr] (u7) at (1.2+0.62*7,0) {$Z_q$};
+      \draw[decorate,decoration={brace,amplitude=3pt,mirror},xred] ([yshift=-2pt]u5.south west) -- ([yshift=-2pt]u7.south east)
+        node[midway,below=3pt,font=\scriptsize,text=xred]{$S$ / $S_0$};
+      \node[qry] (x1) at (7.6,0) {$X_1$};
+      \node[qry] (x2) at (8.22,0) {$\cdots$};
+      \node[qry] (x3) at (8.84,0) {$X_\ell$};
+      \node[font=\scriptsize,text=xgray,above=1pt of x2] {attacker holds};
+      \draw[xgreen,thick,densely dotted] (x1.west) -- (u7.east) node[midway,below,font=\scriptsize,text=xgreen]{same user};
+      \node[font=\scriptsize,text=xgreen,below=1pt of x2] {possibly fresh};
+      \node[draw=xblue,fill=xblue!6,rounded corners,align=center,font=\footnotesize,text width=3.0cm] (qu) at (11.6,0)
+        {did \hl{this user} contribute to the data ?};
+    \end{scope}
+    % ---------- bridge ----------
+    \draw[->,very thick,xblue] (qm.south) -- node[right,font=\scriptsize,align=left]{record\\$\to$ user} (qu.north);
+    \node[draw=xred,fill=xred!6,rounded corners,align=center,font=\footnotesize,inner sep=5pt] at (5.8,-3.75)
+      {Does a sample-level guarantee certify user-level privacy ?};
+  \end{tikzpicture}
 
-\section{Introduction}
 
-Estimating the bounds of Mutual Information for high-dimensional variables is challenging and costly.
+\section{Setting}
 
+\begin{definition}[Users and data]
+Let $\mathcal{V}$ be the token vocabulary and $\X$ the set of finite token sequences.
+
+Let $\U = \{1,\dots,N\}$ be the users. A user $u$ has a text distribution $D_u$ on $\X$ and a document tuple $X_u = (x_u^{(1)},\dots,x_u^{(n_u)})$.
+
+Datasets, user fields, $N$ and $(n_u)_{u\in\U}$ follow Kandpal et al.~\cite{kandpal2024}: Reddit Comments, CC News, Enron Emails.
+\end{definition}
+
+\begin{assumption}[Within-user i.i.d.]\label{ass:iid}
+$X_u \sim D_u^{\,n_u}$, independently across users.
+\end{assumption}
+
+\begin{definition}[Attacker texts and training texts]
+For each user $u$, let $A_u \subset X_u$ be a uniformly random subset of size $m_u$
+
+Let $F_u$ be the remaining documents, after the validation/test reservation of \cite{kandpal2024}. Under Assumption~\ref{ass:iid}, $A_u \sim D_u^{\,m_u}$ and $A_u$ is independent of $F_u$: the attacker texts are fresh samples from the user.
+\end{definition}
+
+\begin{definition}[Membership design]
+Draw $Z_u \overset{\text{i.i.d.}}{\sim} \Bern(1/2)$ for $u\in\U$, independently of all data. Members: $S = \{u : Z_u = 1\}$. Non-members: $H = \U \setminus S$. Fine-tuning set: $D_{\mathrm{FT}} = \biguplus_{u\in S} F_u$.
+\end{definition}
+
+\begin{definition}[Fixed checkpoint]
+$\theta = \Train(\theta_0, D_{\mathrm{FT}}; \xi)$, where $\theta_0$ is pre-trained GPT-Neo (125M or 1.3B), $\Train$ is full fine-tuning with the configuration of \cite{kandpal2024}, $\xi$ is a fixed seed.
+All subsequent probabilities are conditional on $(Z, X, \xi)$; hence $\theta$, $S$, $H$ are fixed.
+\end{definition}
+
+\section{Threat model}
+
+\begin{definition}[Access]
+The attacker has black box access to $\theta = \theta_{FT}$ and to the reference $\theta_0 = \theta_{pre}$:
+on input $x = (x_1,\dots,x_L)$, the models returns the next-token distributions
+$p_\theta(\cdot \mid x_{<t})$ and $p_{\theta_0}(\cdot \mid x_{<t})$ for $t = 1,\dots,L$.
+\end{definition}
+
+\begin{definition}[Record-level scores]
+Let $\ell_t = \log p_\theta(x_t \mid x_{<t})$ and $\log p_\theta(x) = \sum_{t=1}^{L} \ell_t$.
+Fix $k \in (0,1]$ before any evaluation. Let $K_k(\cdot)$ return the indices of the
+$\lceil kL \rceil$ smallest entries of a length-$L$ vector.
+All scores are oriented so that larger means more member-like.
+\begin{align*}
+s_1(x) &= \tfrac{1}{L}\textstyle\sum_{t=1}^{L} \ell_t
+  && \text{(LOSS \cite{yeom2018})}\\
+s_2(x) &= \log p_\theta(x) - \log p_{\theta_0}(x)
+  && \text{(Ref \cite{kandpal2024})}\\
+s_3(x) &= \log p_\theta(x) \,/\, z(x)
+  && \text{(zlib \cite{carlini2021})}\\
+s_4(x) &= \tfrac{1}{|K_k(\ell)|}\textstyle\sum_{t\in K_k(\ell)} \ell_t
+  && 
+s_5(x) &= \tfrac{1}{|K_k(w)|}\textstyle\sum_{t\in K_k(w)} w_t
+  && 
+\end{align*}
+Here $z(x)$ is the zlib-compressed length (bytes) of the text of $x$, and
+$w_t = (\ell_t - \mu_t)/\sigma_t$, with $\mu_t$ and $\sigma_t^2$ the mean and variance of
+$\log p_\theta(v \mid x_{<t})$ for $v \sim p_\theta(\cdot \mid x_{<t})$.
+\end{definition}
+
+\begin{definition}[User-level scores]
+For a finite tuple of texts $A$ and $j \in \{1,\dots,5\}$,
+\[
+T_j(A) = \frac{1}{|A|} \sum_{x\in A} s_j(x).
+\]
+$T_2$ is the user inference statistic $\hat{T}$ of \cite{kandpal2024}:
+\[
+T_2(A) = \frac{1}{|A|} \sum_{x\in A} \log p_\theta(x) - \log p_{\theta_0}(x).
+\]
+\end{definition}
+
+\begin{definition}[Toolbox]
+The attacker defines a decision rule $\varphi$, based on set a threshold $\tau$ such that the fine decision $\F$ is defined as follows:
+\[
+\F = \bigl\{ \varphi_{j,\tau,\sigma}(A) = \Ind\{\sigma\, T_j(A) \ge \tau\} \;:\;
+j \in \{1,\dots,5\},\ \tau \in \R,\ \sigma \in \{-1,+1\} \bigr\}.
+\]
+\end{definition}
+
+\section{The game}
+
+\begin{definition}[Game $G(\theta, S, H)$]\label{def:game}
+To perform the UIA, we adopt the following approach:
+\begin{enumerate}
+  \item Draw $b \sim \Bern(1/2)$.
+  \item If $b = 1$, draw $u \sim \Unif(S)$ (members); otherwise draw $u \sim \Unif(H)$ (non-members).
+  \item Draw fresh texts $A \sim D_u^{\,m_u}$ and give $A$ to the attacker.
+  \item The attacker queries $\theta$ and $\theta_0$, outputs $\hat b = \varphi(A)$.
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Advantage]
+For a decision rule $\varphi$ (possibly randomized),
+\[
+\TPR(\varphi) = \frac{1}{|S|}\sum_{u\in S} \Prob_{A\sim D_u^{m_u}}[\varphi(A)=1],
+\qquad
+\FPR(\varphi) = \frac{1}{|H|}\sum_{u\in H} \Prob_{A\sim D_u^{m_u}}[\varphi(A)=1],
+\]
+$\Adv(\varphi) = \TPR(\varphi) - \FPR(\varphi)$, and the target is
+\[
+\Adv^{*}_{\F}(\theta) = \sup_{\varphi\in\F} \Adv(\varphi).
+\]
+In the data of \cite{kandpal2024}, $A_u$ is one realization of step~3 for each user.
+\end{definition}
+
+Let $M_S = \frac{1}{|S|}\sum_{u\in S} D_u^{\,m_u}$ (members) and
+$M_H = \frac{1}{|H|}\sum_{u\in H} D_u^{\,m_u}$ (non-members), laws on finite tuples of texts.
+
+\begin{proposition}[Unrestricted optimum is model-free]\label{prop:unrestricted}
+For fixed $(\theta, S, H)$, the supremum of $\Adv(\varphi)$ over all randomized rules
+$\varphi$ equals $\TV(M_S, M_H)$. It does not depend on $\theta$.
+\end{proposition}
+
+\begin{proof}
+Since $\theta$ and $\theta_0$ are fixed, every answer is a deterministic function of the query.
+Any attacker is therefore a measurable map $\varphi : A \mapsto [0,1]$, the probability of outputting $1$.
+Under $b=1$, $A \sim M_S$; under $b=0$, $A \sim M_H$. Hence
+$\sup_\varphi \Adv(\varphi) = \sup_{\varphi} \bigl(\E_{M_S}\varphi - \E_{M_H}\varphi\bigr) = \TV(M_S, M_H)$.
+\end{proof}
+
+In the user inference game, hypotheses focus on membership, not model parameters. Fixed models $\theta$ and $\theta_0$ serve as measurement tools, yielding scores like $\log p_\theta(x) - \log p_{\theta_0}(x)$ for each user. The attack separates two histograms of these scores: one for members and one for non-members. This separation's advantage is bounded by $\TV(M_S, M_H)$, with the best threshold rule achieving the Kolmogorov Smirnov (KS) distance between them. Separating texts generated by $\theta$ from those by $\theta_0$ represents a different game, measuring fine-tuning rather than membership, with an optimal advantage of $\TV(P_\theta, P_{\theta_0})$.
+
+So the 2 games are not equivalent: the KS distance is not necessarily equal to the TV distance. The former measures how well we can distinguish between two distributions, while the latter measures the total variation between them.
+
+
+
+\newpage
+\begin{thebibliography}{9}
+\bibitem{kandpal2024}
+N.~Kandpal, K.~Pillutla, A.~Oprea, P.~Kairouz, C.~A.~Choquette-Choo, Z.~Xu.
+User inference attacks on large language models. \emph{EMNLP}, 2024.
+
+\bibitem{yeom2018}
+S.~Yeom, I.~Giacomelli, M.~Fredrikson, S.~Jha.
+Privacy risk in machine learning: Analyzing the connection to overfitting. \emph{IEEE CSF}, 2018.
+
+\bibitem{carlini2021}
+N.~Carlini et al. Extracting training data from large language models. \emph{USENIX Security}, 2021.
+
+\bibitem{shi2024}
+W.~Shi et al. Detecting pretraining data from large language models. \emph{ICLR}, 2024.
+
+
+\bibitem{zhang2025}
+Jingyang Zhang, Jingwei Sun, Eric Yeats, Yang Ouyang, Martin Kuo, Jianyi Zhang,
+Hao Frank Yang, and Hai Li.
+\newblock Min-K\%++: Improved Baseline for Detecting Pre-Training Data from Large
+  Language Models.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}, 2025.
+\newblock arXiv:2404.02936.
+\end{thebibliography}
+
+
+\newpage
+\appendix
+
+\begin{remark}
+$Z_u$ is the design coin, drawn before training. $b$ is the referee's coin, drawn after training.
+$\Adv = \TPR - \FPR$ does not depend on $\Prob(b=1)$; the balanced choice is a convention.
+\end{remark}
+
+\begin{remark}[Deviations from \cite{kandpal2024}]\leavevmode
+\begin{enumerate}[label=(\roman*)]
+  \item \emph{Membership.} \cite{kandpal2024} split users into two fixed halves.
+        Here $Z_u \sim \Bern(1/2)$ independently, so $|S|$ is random with mean $N/2$.
+        This randomization is required for identification (Step~2).
+  \item \emph{Access.} $s_5$ needs full next-token distributions; \cite{kandpal2024} assume
+        sequence likelihoods only. Scores $s_1$--$s_4$ remain valid under their access model.
+  \item \emph{Assumption~\ref{ass:iid}.} It fails under within-user duplicates
+        (about $11$ of CC News articles have exact duplicates within their domain,
+        \cite{kandpal2024}, Appendix~D.5) and under threads (Enron).
+        A duplicate of a training text in $A_u$ turns user inference into membership inference.
+        Deduplicate $A_u$ against $F_u$ for each user.
+  \item \emph{Pre-training overlap.} The fine-tuning datasets partially overlap with The Pile.
+        Since $Z$ is independent of the data, this affects members and non-members alike:
+        it weakens the signal but does not bias the member/non-member comparison.
+\end{enumerate}
+\end{remark}
+
+\begin{remark}
+The game covers one checkpoint, a population average over users, and rules in $\F$ only.
+It does not cover retraining randomness, per-user guarantees, or attacks outside $\F$.
+Estimation of $\Adv^{*}_{\F}(\theta)$ from one draw of $A_u$ per user is deferred to Step~3;
+note that users supply independent but non-identically distributed scores.
+\end{remark}
 
 \end{document}

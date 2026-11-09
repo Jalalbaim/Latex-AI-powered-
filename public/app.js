@@ -1808,6 +1808,8 @@ async function init() {
   registerLanguages();
   createEditor();
   bindUI();
+  // Lets the server know this tab is open (it can stop itself when all tabs are closed).
+  new EventSource('/api/alive');
   loadModels();
   await loadProjects();
 }
