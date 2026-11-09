@@ -1286,6 +1286,42 @@ app.post(
   }),
 );
 
+// ---------- Auto-exit when the last browser tab is closed ----------
+// Enabled by the Windows launcher (LATEXAI_EXIT_WHEN_IDLE=1); `npm start` is unaffected.
+// Each open tab keeps an event stream open; when none is left for a grace period
+// (long enough to survive a page reload), the server exits.
+const EXIT_WHEN_IDLE = process.env.LATEXAI_EXIT_WHEN_IDLE === '1';
+const IDLE_GRACE_MS = Number(process.env.LATEXAI_IDLE_GRACE_MS || 20000);
+let openTabs = 0;
+let idleTimer = null;
+
+function armIdleExit(ms) {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (openTabs === 0) {
+      console.log('No open tabs left, shutting down.');
+      process.exit(0);
+    }
+  }, ms);
+}
+
+app.get('/api/alive', (req, res) => {
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify({ exitWhenIdle: EXIT_WHEN_IDLE })}\n\n`);
+  openTabs++;
+  clearTimeout(idleTimer);
+  const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+  req.on('close', () => {
+    clearInterval(ping);
+    openTabs--;
+    if (EXIT_WHEN_IDLE && openTabs === 0) armIdleExit(IDLE_GRACE_MS);
+  });
+});
+
+// If the browser never connects (e.g. it failed to open), don't linger forever.
+if (EXIT_WHEN_IDLE) armIdleExit(120000);
+
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
 app.use((err, req, res, next) => {
