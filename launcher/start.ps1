@@ -22,12 +22,17 @@ function Test-Url($u) {
 if (Test-Url $Health) { Start-Process $Url; exit 0 }
 
 # 2. Make sure Ollama is up (don't wait for it: the editor works without it).
+#    If we start it here, tell the server (via LATEXAI_STOP_OLLAMA) to stop it again
+#    on exit. An Ollama that was already running is left alone.
+$env:LATEXAI_STOP_OLLAMA = '0'
 if (-not (Test-Url 'http://127.0.0.1:11434/api/tags')) {
     $ollamaApp = Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama app.exe'
     if (Test-Path $ollamaApp) {
         Start-Process $ollamaApp
+        $env:LATEXAI_STOP_OLLAMA = '1'
     } elseif (Get-Command ollama -ErrorAction SilentlyContinue) {
         Start-Process ollama -ArgumentList 'serve' -WindowStyle Hidden
+        $env:LATEXAI_STOP_OLLAMA = '1'
     }
 }
 

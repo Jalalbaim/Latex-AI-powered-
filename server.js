@@ -3,7 +3,7 @@
 // proxies AI requests to a local Ollama instance.
 
 import express from 'express';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -1327,11 +1327,23 @@ const IDLE_GRACE_MS = Number(process.env.LATEXAI_IDLE_GRACE_MS || 20000);
 let openTabs = 0;
 let idleTimer = null;
 
+// The Windows launcher sets LATEXAI_STOP_OLLAMA=1 only when it started Ollama itself,
+// so an Ollama the user started on their own is never stopped.
+function stopOllamaIfWeStartedIt() {
+  if (process.env.LATEXAI_STOP_OLLAMA !== '1' || process.platform !== 'win32') return;
+  console.log('Stopping Ollama (it was started by the launcher).');
+  // The tray app first (otherwise it restarts the server), then the server and model runners.
+  for (const image of ['ollama app.exe', 'ollama.exe']) {
+    spawnSync('taskkill', ['/IM', image, '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  }
+}
+
 function armIdleExit(ms) {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     if (openTabs === 0) {
       console.log('No open tabs left, shutting down.');
+      stopOllamaIfWeStartedIt();
       process.exit(0);
     }
   }, ms);
