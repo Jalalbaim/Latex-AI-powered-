@@ -123,9 +123,33 @@ async function listFiles(dir) {
 
 const compileLocks = new Map();
 
+// MiKTeX's latexmk.exe needs Perl. On Windows, if no Perl is on PATH (e.g. the
+// server was started from the desktop shortcut), fall back to the Perl that
+// ships with Git for Windows.
+async function latexPath() {
+  const sep = path.delimiter;
+  const current = process.env.PATH || process.env.Path || '';
+  if (process.platform !== 'win32') return current;
+  const dirs = current.split(sep).filter(Boolean);
+  for (const d of dirs) if (await exists(path.join(d, 'perl.exe'))) return current;
+  const candidates = [];
+  for (const d of dirs) {
+    if (await exists(path.join(d, 'git.exe'))) candidates.push(path.join(path.dirname(d), 'usr', 'bin'));
+  }
+  for (const base of [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')]) {
+    if (base) candidates.push(path.join(base, 'Git', 'usr', 'bin'));
+  }
+  for (const c of candidates) if (await exists(path.join(c, 'perl.exe'))) return current + sep + c;
+  return current;
+}
+
 function runProcess(cmd, args, opts, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { ...opts, detached: true });
+    // detached gives the child its own process group so a timeout can kill the
+    // whole tree. On Windows it also strips the console, which crashes MiKTeX's
+    // latexmk.exe (0xC0000409), so there we kill the tree with taskkill instead.
+    const isWin = process.platform === 'win32';
+    const child = spawn(cmd, args, { ...opts, detached: !isWin, windowsHide: true });
     let output = '';
     const collect = (d) => {
       output += d.toString();
@@ -137,7 +161,8 @@ function runProcess(cmd, args, opts, timeoutMs) {
     const timer = setTimeout(() => {
       timedOut = true;
       try {
-        process.kill(-child.pid, 'SIGKILL');
+        if (isWin) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+        else process.kill(-child.pid, 'SIGKILL');
       } catch {
         child.kill('SIGKILL');
       }
@@ -237,8 +262,10 @@ async function compileProject(dir, main) {
 
   const engineFlag = { pdf: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' }[LATEX_ENGINE] || '-pdf';
   const args = [engineFlag, '-interaction=nonstopmode', '-file-line-error', '-synctex=1', `-outdir=${BUILD_DIR}`, main];
+  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toUpperCase() !== 'PATH'));
   const env = {
-    ...process.env,
+    ...baseEnv,
+    PATH: await latexPath(),
     max_print_line: '10000', // stop TeX from wrapping log lines at 79 chars
     error_line: '254',
     half_error_line: '238',
@@ -273,6 +300,11 @@ async function compileProject(dir, main) {
     // no pdf
   }
   const ok = result.code === 0 && !result.timedOut;
+  let output = ok && errors.length ? '' : result.output.split('\n').slice(-60).join('\n');
+  if (!ok && !errors.length && !output.trim()) {
+    output = `latexmk exited with code ${result.code} without producing any output. ` +
+      'If you use MiKTeX, make sure Perl is installed (latexmk needs it).';
+  }
   return {
     ok,
     timedOut: result.timedOut,
@@ -280,7 +312,7 @@ async function compileProject(dir, main) {
     pdfUpdated,
     errors,
     warnings,
-    output: ok && errors.length ? '' : result.output.split('\n').slice(-60).join('\n'),
+    output,
     durationMs: Date.now() - started,
   };
 }
